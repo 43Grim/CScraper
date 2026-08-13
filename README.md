@@ -10,7 +10,7 @@ A powerful, automated JavaScript console script designed to scrape assessment da
 - **Deep Content Extraction**:
   - **Grades & Results**: Extracts numerical or letter grades and status details.
   - **Teacher Feedback**: Captures comments and feedback notes.
-  - **File Attachments & Submissions**: Uses `window.open` interception and direct asset link resolution to harvest student submissions, task attachments, and teacher response files.
+  ~~- **File Attachments & Submissions**: Uses `window.open` interception and direct asset link resolution to harvest student submissions, task attachments, and teacher response files.~~
 - **Live Visual Dashboard**: Displays a sleek, non-intrusive floating overlay panel in the top-right corner with real-time progress counters, status phases, time elapsed, and dynamic ETAs.
 
 ---
