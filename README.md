@@ -1,4 +1,4 @@
-## 📚 Compass Multi-Subject Assessment Scraper v0.5.0
+## 📚 Compass Multi-Subject Assessment Scraper v0.7.0
 
 A powerful, automated JavaScript console script designed to scrape assessment data, grades, teacher feedback, rubrics, and file attachments across multiple subjects from **Compass Education**, packaging everything into a clean HTML portfolio dashboard and a downloadable ZIP archive.
 ## Known Bugs
