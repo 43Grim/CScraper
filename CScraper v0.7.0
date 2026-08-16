@@ -1,0 +1,1440 @@
+(async function () {
+
+// ════════════════════════════════════════════════════════════════
+// § 0 — CONFIG
+// ════════════════════════════════════════════════════════════════
+const CFG = {
+    scrollPause:          400,
+    betweenTasks:         1400,
+    gridRefreshWait:      1800,
+    modalOpenTimeout:     14000,
+    modalCloseTimeout:    9000,
+    tabStableMs:          600,
+    tabPollInterval:      200,
+    tabLoadTimeout:       10000,
+    networkTimeout:       8000,
+    fetchTimeout:         35000,
+    retryDelay:           2500,
+    jszipCDN: 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
+};
+
+// ════════════════════════════════════════════════════════════════
+// § 1 — DASHBOARD
+// ════════════════════════════════════════════════════════════════
+document.getElementById('cscraper-v1')?.remove();
+
+const dash = document.createElement('div');
+dash.id = 'cscraper-v1';
+
+dash.style.cssText = [
+    'position:fixed',
+    'top:10px',
+    'right:10px',
+    'width:460px',
+    'background:rgba(6,6,16,0.98)',
+    'color:#eee',
+    'padding:16px',
+    'border-radius:11px',
+    'z-index:9999999',
+    'font-family:monospace',
+    'font-size:11px',
+    'box-shadow:0 6px 35px rgba(0,0,0,.95)',
+    'border:1px solid #00cec9',
+    'max-height:92vh',
+    'overflow-y:auto',
+].join(';');
+
+dash.innerHTML = `
+<div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #1e1e3a;padding-bottom:8px;margin-bottom:10px;">
+  <span style="font-size:13px;font-weight:bold;color:#00cec9;">Compass Scraper</span>
+  <span style="font-size:10px;color:#444;">v1.6</span>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;font-size:10px;margin-bottom:7px;">
+  <div>Time: <span id="cs-time" style="color:#00cec9">00:00</span></div>
+  <div>Progress: <span id="cs-prog" style="color:#fff">—</span></div>
+  <div style="text-align:right;">ETA <span id="cs-eta" style="color:#aaa">—</span></div>
+</div>
+
+<div style="height:6px;background:#0d0d20;border-radius:3px;margin-bottom:8px;overflow:hidden;">
+  <div id="cs-bar" style="width:0%;height:100%;background:linear-gradient(90deg,#00cec9,#0984e3);border-radius:3px;transition:width 0.4s;"></div>
+</div>
+
+<div style="font-size:10px;margin-bottom:2px;">
+  <span style="color:#555">Phase: </span>
+  <span id="cs-phase" style="color:#fdcb6e">Starting…</span>
+</div>
+
+<div style="font-size:9px;color:#555;margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+  <span id="cs-cur">—</span>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:3px;font-size:10px;margin-bottom:7px;">
+  <div>Done: <span id="cs-done" style="color:#00b894;font-weight:bold">0</span></div>
+  <div>Skip: <span id="cs-skip" style="color:#fdcb6e">0</span></div>
+  <div>Error: <span id="cs-err" style="color:#e17055">0</span></div>
+  <div>Files: <span id="cs-files" style="color:#a29bfe">0</span></div>
+</div>
+
+<div id="cs-log" style="background:#040410;padding:6px;border-radius:5px;font-size:9px;color:#555;max-height:230px;overflow-y:auto;line-height:1.45;"></div>
+
+<button id="cs-stop" style="margin-top:10px;width:100%;background:#7b241c;color:#fff;border:none;padding:8px;cursor:pointer;border-radius:6px;font-family:monospace;font-weight:bold;font-size:11px;">
+STOP
+</button>
+`;
+
+document.body.appendChild(dash);
+
+const ui = {
+    time:   document.getElementById('cs-time'),
+    prog:   document.getElementById('cs-prog'),
+    eta:    document.getElementById('cs-eta'),
+    bar:    document.getElementById('cs-bar'),
+    phase:  document.getElementById('cs-phase'),
+    cur:    document.getElementById('cs-cur'),
+    done:   document.getElementById('cs-done'),
+    skip:   document.getElementById('cs-skip'),
+    err:    document.getElementById('cs-err'),
+    files:  document.getElementById('cs-files'),
+    log:    document.getElementById('cs-log'),
+    stop:   document.getElementById('cs-stop'),
+};
+
+let running   = true;
+let fileCount = 0;
+
+const counts = {
+    done: 0,
+    skip: 0,
+    err: 0
+};
+
+const startMs = Date.now();
+const taskTimings = [];
+
+const timerInterval = setInterval(() => {
+    const d = Math.floor((Date.now() - startMs) / 1000);
+    ui.time.textContent = `${String(Math.floor(d / 60)).padStart(2, '0')}:${String(d % 60).padStart(2, '0')}`;
+}, 1000);
+
+ui.stop.onclick = () => {
+    running = false;
+    setPhase('Stopped by user', '#e17055');
+};
+
+// ════════════════════════════════════════════════════════════════
+// § 2 — UTILITIES
+// ════════════════════════════════════════════════════════════════
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+const log = (msg, color = '#555') => {
+    console.log(msg);
+    const el = document.createElement('div');
+    el.style.color = color;
+    el.textContent = msg;
+    ui.log.appendChild(el);
+    ui.log.scrollTop = ui.log.scrollHeight;
+};
+
+const setPhase = (text, color = '#fdcb6e') => {
+    ui.phase.textContent = text;
+    ui.phase.style.color = color;
+};
+
+const updateETA = remaining => {
+    if (taskTimings.length < 2) {
+        ui.eta.textContent = '—';
+        return;
+    }
+
+    const avg = taskTimings.slice(-8).reduce((a, b) => a + b, 0) / Math.min(8, taskTimings.length);
+    const s = Math.round(avg * remaining / 1000);
+
+    ui.eta.textContent = s > 3600
+        ? `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}m`
+        : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s`;
+};
+
+const sanitizePath = s =>
+    s
+        .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .substring(0, 80);
+
+// ════════════════════════════════════════════════════════════════
+// § 3 — JSZIP LOADER
+// ════════════════════════════════════════════════════════════════
+
+const loadJSZip = () =>
+    new Promise((resolve, reject) => {
+        if (window.JSZip) {
+            resolve(window.JSZip);
+            return;
+        }
+
+        const s = document.createElement('script');
+        s.src = CFG.jszipCDN;
+
+        s.onload = () =>
+            window.JSZip ? resolve(window.JSZip) : reject(new Error('JSZip undefined'));
+
+        s.onerror = () =>
+            reject(new Error('CDN blocked by CSP'));
+
+        document.head.appendChild(s);
+
+        setTimeout(() => reject(new Error('JSZip load timeout')), 12000);
+    });
+
+// ════════════════════════════════════════════════════════════════
+// § 4 — ADAPTIVE WAITERS
+// ════════════════════════════════════════════════════════════════
+
+const waitForTabStable = async (modal, timeout = CFG.tabLoadTimeout) => {
+    await sleep(300);
+
+    const dl = Date.now() + timeout;
+    let lastLen = 0;
+    let stableCount = 0;
+
+    while (Date.now() < dl) {
+        const body = modal.querySelector('.x-tab-panel-body') || modal;
+        const len = body.innerHTML.length;
+
+        if (len > 0 && len === lastLen) {
+            stableCount++;
+            if (stableCount * CFG.tabPollInterval >= CFG.tabStableMs) {
+                return;
+            }
+        } else {
+            stableCount = 0;
+            lastLen = len;
+        }
+
+        await sleep(CFG.tabPollInterval);
+    }
+};
+
+const waitForModalContent = async (modal, timeout = 7000) => {
+    const dl = Date.now() + timeout;
+
+    while (Date.now() < dl) {
+        const t = modal.querySelector('.x-window-header-text,.x-title-text,.x-window-header .x-title')?.innerText?.trim();
+        if (t && t.length > 2) {
+            return t;
+        }
+        await sleep(200);
+    }
+
+    return null;
+};
+
+// ════════════════════════════════════════════════════════════════
+// § 5 — SUBJECT + TASK COLLECTION
+// ════════════════════════════════════════════════════════════════
+
+const buildHeaderList = () =>
+    [...document.querySelectorAll('.x-grid-group-hd')]
+        .map(el => ({
+            el,
+            text: el.querySelector('.x-grid-group-title')?.innerText?.trim()
+                || el.innerText?.trim().split('\n')[0].trim()
+                || ''
+        }))
+        .filter(h => h.text.length > 2);
+
+const getSubject = (rowEl, headerList) => {
+    for (let i = headerList.length - 1; i >= 0; i--) {
+        if (headerList[i].el.compareDocumentPosition(rowEl) & Node.DOCUMENT_POSITION_FOLLOWING) {
+            return headerList[i].text;
+        }
+    }
+    return 'Unknown';
+};
+
+const collectTasks = () => {
+    const tasks = [];
+    const seenSubjTitle = new Set();
+    const titleOcc = {};
+    const headers = buildHeaderList();
+
+    const parseRow = (row, overrideSubject) => {
+        const launcher = row.querySelector('.task-submission-launcher');
+        if (!launcher) return null;
+
+        const title = launcher.innerText?.trim() || '';
+        if (!title || title.toLowerCase().includes('browse')) {
+            return null;
+        }
+
+        const subject = overrideSubject || getSubject(row, headers);
+        const key = `${subject}|||${title}`;
+
+        if (seenSubjTitle.has(key)) {
+            return null;
+        }
+
+        seenSubjTitle.add(key);
+
+        const occ = titleOcc[title] ?? 0;
+        titleOcc[title] = occ + 1;
+
+        const cells = row.querySelectorAll('.x-grid-cell');
+        const cell0 = cells[0]?.innerText || '';
+        const cell1 = cells[1]?.innerText || '';
+        const cell2 = cells[2]?.innerText?.trim() || '';
+
+        const category = cell0.split('\n').map(l => l.trim()).find(l => l) || 'Unknown';
+        const dueMatch = cell1.match(/Due date[:\s]+([^\n]+)/i);
+
+        return {
+            title,
+            subject,
+            category,
+            dueDate: dueMatch ? dueMatch[1].trim() : 'No due date',
+            gridResult: cell2,
+            occurrenceIndex: occ
+        };
+    };
+
+    document.querySelectorAll('.x-grid-row.x-grid-data-row').forEach(r => {
+        const t = parseRow(r);
+        if (t) tasks.push(t);
+    });
+
+    document.querySelectorAll('.x-grid-row.x-grid-group-row').forEach(r => {
+        if (!r.querySelector('.task-submission-launcher')) {
+            return;
+        }
+
+        const hdr = r.querySelector('.x-grid-group-hd');
+        const ttl = r.querySelector('.x-grid-group-title');
+
+        const sub = ttl?.innerText?.trim()
+            || hdr?.innerText?.trim().split('\n')[0].trim()
+            || getSubject(r, headers);
+
+        const t = parseRow(r, sub);
+        if (t) tasks.push(t);
+    });
+
+    const allLaunchers = [...document.querySelectorAll('.task-submission-launcher')];
+    const idxMap = new Map();
+    const occ2 = {};
+
+    allLaunchers.forEach((el, i) => {
+        const txt = el.innerText?.trim() || '';
+        const o = occ2[txt] ?? 0;
+        occ2[txt] = o + 1;
+        idxMap.set(`${txt}|||${o}`, i);
+    });
+
+    tasks.sort((a, b) =>
+        (idxMap.get(`${a.title}|||${a.occurrenceIndex}`) ?? 9999) -
+        (idxMap.get(`${b.title}|||${b.occurrenceIndex}`) ?? 9999)
+    );
+
+    return tasks;
+};
+
+// ════════════════════════════════════════════════════════════════
+// § 6 — LIVE ROW LOOKUP
+// ════════════════════════════════════════════════════════════════
+
+const findLiveRow = (targetTitle, occurrenceIndex) => {
+    let count = 0;
+
+    for (const launcher of document.querySelectorAll('.task-submission-launcher')) {
+        if (launcher.innerText?.trim() === targetTitle) {
+            if (count === occurrenceIndex) {
+                let el = launcher;
+                while (el && !el.classList.contains('x-grid-row')) {
+                    el = el.parentElement;
+                }
+                return {
+                    launcher,
+                    row: el || launcher
+                };
+            }
+            count++;
+        }
+    }
+
+    return null;
+};
+
+// ════════════════════════════════════════════════════════════════
+// § 7 — MODAL HELPERS
+// ════════════════════════════════════════════════════════════════
+
+const getActiveModal = () => {
+    for (const w of document.querySelectorAll('.x-window')) {
+        if (!w.offsetParent) continue;
+        if (!w.querySelector('.x-tool-close, .x-tool-img.x-tool-close')) {
+            continue;
+        }
+        return w;
+    }
+    return null;
+};
+
+const waitForNewModal = async (prevModal) => {
+    const dl = Date.now() + CFG.modalOpenTimeout;
+
+    while (Date.now() < dl) {
+        const m = getActiveModal();
+        if (m && m !== prevModal) {
+            return m;
+        }
+        await sleep(200);
+    }
+
+    const m = getActiveModal();
+    if (m && m !== prevModal) {
+        return m;
+    }
+
+    throw new Error('Modal did not open within timeout');
+};
+
+const waitForModalClose = async () => {
+    const dl = Date.now() + CFG.modalCloseTimeout;
+
+    while (Date.now() < dl) {
+        if (!getActiveModal()) {
+            return;
+        }
+        await sleep(150);
+    }
+};
+
+const closeModal = async modal => {
+    if (!modal) return;
+
+    const btn = modal.querySelector('.x-tool-close, .x-tool-img.x-tool-close');
+
+    if (btn) {
+        btn.click();
+    } else {
+        document.body.dispatchEvent(
+            new KeyboardEvent('keydown', {
+                key: 'Escape',
+                keyCode: 27,
+                bubbles: true
+            })
+        );
+    }
+
+    await waitForModalClose();
+    await sleep(CFG.gridRefreshWait);
+};
+
+// ════════════════════════════════════════════════════════════════
+// § 8 — TAB NAVIGATION
+// ════════════════════════════════════════════════════════════════
+
+const findTab = (modal, fragment) =>
+    [...modal.querySelectorAll('.x-tab, [role="tab"], a.x-tab')]
+        .find(el => el.innerText?.trim().toLowerCase().includes(fragment.toLowerCase()));
+
+const clickTab = async (modal, fragment) => {
+    const tab = findTab(modal, fragment);
+    if (!tab) return false;
+
+    tab.click();
+    await waitForTabStable(modal);
+    return true;
+};
+
+// ════════════════════════════════════════════════════════════════
+// § 9 — PANEL FINDER
+// ════════════════════════════════════════════════════════════════
+
+const findPanelByHeader = (modal, headerText) => {
+    for (const span of modal.querySelectorAll('.x-panel-header-text, .x-header-text, .x-panel-header-text-blue-panel, .x-panel-header-text-orange-panel')) {
+        if (span.innerText?.trim().includes(headerText)) {
+            let el = span;
+            while (el && !el.classList.contains('x-panel')) {
+                el = el.parentElement;
+            }
+            return el || span.closest('[class*="x-panel"]');
+        }
+    }
+    return null;
+};
+
+// ════════════════════════════════════════════════════════════════
+// § 10 — SILENT DOWNLOAD URL CAPTURE
+// ════════════════════════════════════════════════════════════════
+
+const captureDownloadUrlFromNetwork = (timeout = CFG.networkTimeout) => {
+    return new Promise(resolve => {
+        let resolved = false;
+        let observer = null;
+        let anchorClickHandler = null;
+
+        const isDownloadUrl = url => {
+            if (!url || typeof url !== 'string') {
+                return false;
+            }
+            const u = url.toLowerCase();
+            return (
+                u.includes('fileassets.svc') ||
+                u.includes('downloadfile') ||
+                /\.(pdf|docx?|xlsx?|pptx?|zip|png|jpe?g|gif|txt|csv)(\?|$)/i.test(u)
+            );
+        };
+
+        const origWindowOpen = window.open;
+        const origCreateElement = document.createElement;
+        const origAnchorClick = HTMLAnchorElement.prototype.click;
+
+        const restoreHooks = () => {
+            window.open = origWindowOpen;
+            document.createElement = origCreateElement;
+            HTMLAnchorElement.prototype.click = origAnchorClick;
+
+            if (anchorClickHandler) {
+                document.removeEventListener('click', anchorClickHandler, true);
+                anchorClickHandler = null;
+            }
+
+            try {
+                observer?.disconnect();
+            } catch {}
+        };
+
+        const finish = url => {
+            if (resolved || !isDownloadUrl(url)) {
+                return;
+            }
+            resolved = true;
+            clearTimeout(timer);
+            restoreHooks();
+            resolve(url);
+        };
+
+        const timer = setTimeout(() => {
+            if (resolved) return;
+            resolved = true;
+            restoreHooks();
+            resolve(null);
+        }, timeout);
+
+        // HOOK 1: window.open()
+        window.open = function(url, target, features) {
+            if (isDownloadUrl(url)) {
+                finish(url);
+                return null;
+            }
+            return origWindowOpen.call(this, url, target, features);
+        };
+
+        // HOOK 2: hidden iframe creation
+        document.createElement = function(tagName, options) {
+            const el = origCreateElement.call(this, tagName, options);
+
+            if (String(tagName).toLowerCase() !== 'iframe') {
+                return el;
+            }
+
+            const origSetAttribute = el.setAttribute.bind(el);
+
+            el.setAttribute = function(name, value) {
+                if (String(name).toLowerCase() === 'src' && isDownloadUrl(value)) {
+                    finish(value);
+                    return;
+                }
+                return origSetAttribute(name, value);
+            };
+
+            try {
+                Object.defineProperty(el, 'src', {
+                    configurable: true,
+                    get() {
+                        return el.getAttribute('src') || '';
+                    },
+                    set(value) {
+                        if (isDownloadUrl(value)) {
+                            finish(value);
+                            return;
+                        }
+                        origSetAttribute('src', value);
+                    }
+                });
+            } catch {}
+
+            return el;
+        };
+
+        // HOOK 3: programmatic <a>.click()
+        HTMLAnchorElement.prototype.click = function() {
+            const href = this.href;
+
+            if ((this.hasAttribute('download') || isDownloadUrl(href)) && isDownloadUrl(href)) {
+                finish(href);
+                return;
+            }
+
+            return origAnchorClick.call(this);
+        };
+
+        // HOOK 4: capture-phase anchor navigation
+        anchorClickHandler = event => {
+            const anchor = event.target?.closest?.('a');
+            if (!anchor) return;
+
+            const href = anchor.href;
+
+            if (isDownloadUrl(href)) {
+                event.preventDefault();
+                event.stopPropagation();
+                event.stopImmediatePropagation();
+                finish(href);
+            }
+        };
+
+        document.addEventListener('click', anchorClickHandler, true);
+
+        // HOOK 5: PerformanceObserver
+        try {
+            observer = new PerformanceObserver(list => {
+                for (const entry of list.getEntries()) {
+                    if (isDownloadUrl(entry.name)) {
+                        finish(entry.name);
+                        return;
+                    }
+                }
+            });
+
+            observer.observe({
+                type: 'resource',
+                buffered: true
+            });
+        } catch (e) {
+            console.warn('PerformanceObserver unavailable:', e);
+        }
+    });
+};
+
+// ════════════════════════════════════════════════════════════════
+// § 11 — EXTRACTORS
+// ════════════════════════════════════════════════════════════════
+
+const extractTaskAttachments = modal => {
+    const results = [];
+    const seen = new Set();
+
+    modal.querySelectorAll('a[href*="FileAssets.svc/DownloadFile"]').forEach(a => {
+        const href = a.href;
+        if (seen.has(href)) return;
+        seen.add(href);
+
+        let filename = a.innerText?.trim() || '';
+
+        try {
+            const origName = new URL(href).searchParams.get('originalFileName');
+            if (origName) {
+                filename = decodeURIComponent(origName);
+            }
+        } catch {}
+
+        results.push({
+            url: href,
+            filename: filename || `attachment_${results.length + 1}`,
+            category: 'task-attachment',
+            fetched: false,
+            buffer: null,
+            reason: null
+        });
+    });
+
+    return results;
+};
+
+// ════════════════════════════════════════════════════════════════
+// § 11A — FETCH FILE SILENTLY
+// ════════════════════════════════════════════════════════════════
+
+const fetchFile = async url => {
+    const ctrl = new AbortController();
+    const timeout = setTimeout(() => ctrl.abort(), CFG.fetchTimeout);
+
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            credentials: 'include',
+            redirect: 'follow',
+            cache: 'no-store',
+            signal: ctrl.signal
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status} ${response.statusText}`);
+        }
+
+        const contentType = response.headers.get('content-type') || '';
+
+        if (contentType.includes('text/html') && !url.toLowerCase().includes('.html')) {
+            throw new Error(`Got HTML instead of file (${contentType})`);
+        }
+
+        return await response.arrayBuffer();
+    } finally {
+        clearTimeout(timeout);
+    }
+};
+
+// ════════════════════════════════════════════════════════════════
+// § 11B — FETCH + STORE FILE
+// ════════════════════════════════════════════════════════════════
+
+const fetchAndStoreFile = async file => {
+    if (!file.url) {
+        file.fetched = false;
+        file.reason = 'No download URL';
+        return false;
+    }
+
+    try {
+        log(`Fetching ${file.filename.substring(0, 55)}`, '#74b9ff');
+
+        const buffer = await fetchFile(file.url);
+
+        file.buffer = buffer;
+        file.fetched = true;
+        file.size = buffer.byteLength;
+
+        log(`Fetched ${file.filename.substring(0, 50)} (${buffer.byteLength} bytes)`, '#00b894');
+        return true;
+    } catch (e) {
+        file.buffer = null;
+        file.fetched = false;
+        file.reason = e?.name === 'AbortError' ? 'Fetch timed out' : e.message;
+
+        log(`${file.filename.substring(0, 40)} — ${file.reason}`, '#e17055');
+        return false;
+    }
+};
+
+// ════════════════════════════════════════════════════════════════
+// § 11C — FILENAME FROM TABLE ROW
+// ════════════════════════════════════════════════════════════════
+
+const getFilenameFromRow = row => {
+    let filename = '';
+
+    if (row) {
+        row.querySelectorAll('td[data-qtip]').forEach(td => {
+            const q = td.getAttribute('data-qtip') || '';
+            if (q && /\.\w{2,5}$/.test(q)) {
+                filename = q;
+            }
+        });
+
+        if (!filename) {
+            row.querySelectorAll('td').forEach(td => {
+                const t = td.innerText?.trim();
+                if (t && /\.\w{2,5}$/.test(t)) {
+                    filename = t;
+                }
+            });
+        }
+    }
+
+    return filename;
+};
+
+// ════════════════════════════════════════════════════════════════
+// § 11D — SUBMISSION FILES
+// ════════════════════════════════════════════════════════════════
+
+const extractSubmissionFiles = async modal => {
+    const results = [];
+    const panel = findPanelByHeader(modal, 'File Upload');
+
+    if (!panel) {
+        log('(No "File Upload" panel)', '#555');
+        return results;
+    }
+
+    const icons = [...panel.querySelectorAll('img.x-action-col-icon')];
+
+    for (const icon of icons) {
+        const row = icon.closest('tr');
+        const filename = getFilenameFromRow(row) || `submission_${results.length + 1}`;
+
+        log(`Capturing download URL: ${filename.substring(0, 45)}`, '#74b9ff');
+
+        const urlPromise = captureDownloadUrlFromNetwork();
+
+        icon.dispatchEvent(new MouseEvent('click', {
+            bubbles: true,
+            cancelable: true,
+            view: window
+        }));
+
+        const url = await urlPromise;
+
+        const file = {
+            filename,
+            url: url || null,
+            category: 'submission',
+            fetched: false,
+            buffer: null,
+            reason: null
+        };
+
+        if (url) {
+            await fetchAndStoreFile(file);
+        } else {
+            file.reason = 'No network download URL captured';
+            log(`No network URL for ${filename.substring(0, 40)}`, '#fdcb6e');
+        }
+
+        results.push(file);
+    }
+
+    return results;
+};
+
+// ════════════════════════════════════════════════════════════════
+// § 11E — TEACHER RESPONSES
+// ════════════════════════════════════════════════════════════════
+
+const extractTeacherResponses = async modal => {
+    const results = [];
+    const panel = findPanelByHeader(modal, 'Teacher Responses');
+
+    if (!panel || panel.innerText?.includes('No responses')) {
+        return results;
+    }
+
+    const icons = [...panel.querySelectorAll('img.x-action-col-icon')];
+
+    for (const icon of icons) {
+        const row = icon.closest('tr');
+        const filename = getFilenameFromRow(row) || `teacher_response_${results.length + 1}`;
+
+        log(`Capturing download URL: ${filename.substring(0, 45)}`, '#74b9ff');
+
+        const urlPromise = captureDownloadUrlFromNetwork();
+
+        icon.dispatchEvent(new MouseEvent('click', {
+            bubbles: true,
+            cancelable: true,
+            view: window
+        }));
+
+        const url = await urlPromise;
+
+        const file = {
+            filename,
+            url: url || null,
+            category: 'teacher-response',
+            fetched: false,
+            buffer: null,
+            reason: null
+        };
+
+        if (url) {
+            await fetchAndStoreFile(file);
+        } else {
+            file.reason = 'No network download URL captured';
+            log(`No network URL for ${filename.substring(0, 40)}`, '#fdcb6e');
+        }
+
+        results.push(file);
+    }
+
+    return results;
+};
+
+// ════════════════════════════════════════════════════════════════
+// § 12 — GRADES + FEEDBACK
+// ════════════════════════════════════════════════════════════════
+
+const SKIP_LABELS = new Set([
+    'online submission enabled',
+    'name',
+    'due date',
+    'filename',
+    'uploaded',
+    'file',
+    'actions',
+    'size',
+    'type',
+    'date',
+    'create submission',
+    'conversation',
+    'add comment',
+    'message',
+    'attachments',
+]);
+
+const extractGradesAndFeedback = modal => {
+    const grades = {};
+    let feedback = '';
+
+    modal.querySelectorAll('table').forEach(table => {
+        table.querySelectorAll('tr').forEach(tr => {
+            const cells = tr.querySelectorAll('td');
+            if (cells.length < 2) return;
+
+            const label = cells[0].innerText.trim();
+            const value = cells[1].innerText.trim();
+
+            if (!label || !value || label.length > 200 || value.length > 10000) {
+                return;
+            }
+
+            const ll = label.toLowerCase();
+
+            if (ll.startsWith('comment')) {
+                if (value.split(/\s+/).filter(Boolean).length >= 3 && value.length > 10) {
+                    feedback = value;
+                }
+                return;
+            }
+
+            if (SKIP_LABELS.has(ll) || label.includes('Attachments') || label.includes('Submission')) {
+                return;
+            }
+
+            if (value.split('\n').filter(l => l.trim()).length > 8) {
+                return;
+            }
+
+            grades[label] = value;
+        });
+    });
+
+    return { grades, feedback };
+};
+
+// ════════════════════════════════════════════════════════════════
+// § 13 — STARTUP
+// ════════════════════════════════════════════════════════════════
+
+log('Scanning…', '#00cec9');
+setPhase('Scanning');
+
+const allTasks = collectTasks();
+const assessments = allTasks.filter(t => t.category.toLowerCase().includes('assessment'));
+
+log(`Found ${allTasks.length} rows -> ${assessments.length} assessments`, '#00b894');
+log(`${[...new Set(assessments.map(t => t.subject))].length} subjects`, '#666');
+
+if (assessments.length === 0) {
+    alert(
+        'No Assessment tasks found!\n\n' +
+        'Make sure:\n' +
+        '• All Subjects view\n' +
+        '• Groups expanded\n' +
+        '• "Assessment" filter applied'
+    );
+    clearInterval(timerInterval);
+    dash.remove();
+    return;
+}
+
+let JSZipLib = null;
+
+setPhase('Loading JSZip…');
+
+try {
+    JSZipLib = await loadJSZip();
+    log('JSZip ready', '#00b894');
+} catch (e) {
+    log(`JSZip failed: ${e.message}`, '#e17055');
+    alert('JSZip could not be loaded. Cannot create the ZIP.');
+    clearInterval(timerInterval);
+    dash.remove();
+    return;
+}
+
+const zip = new JSZipLib();
+ui.prog.textContent = `0 / ${assessments.length}`;
+setPhase('Ready');
+
+await sleep(500);
+
+// ════════════════════════════════════════════════════════════════
+// § 14 — MAIN LOOP
+// ════════════════════════════════════════════════════════════════
+
+const results = [];
+const processedSet = new Set();
+
+for (let i = 0; i < assessments.length; i++) {
+    if (!running) break;
+
+    const task = assessments[i];
+    const taskKey = `${task.subject}|||${task.title}`;
+    const taskStart = Date.now();
+
+    ui.prog.textContent = `${i + 1} / ${assessments.length}`;
+    ui.bar.style.width = `${((i + 1) / assessments.length * 100).toFixed(1)}%`;
+    ui.cur.textContent = `[${task.subject.substring(0, 20)}] ${task.title.substring(0, 38)}`;
+
+    updateETA(assessments.length - i - 1);
+
+    if (processedSet.has(taskKey)) {
+        log(`Dup: ${task.title.substring(0, 50)}`, '#fdcb6e');
+        counts.skip++;
+        ui.skip.textContent = counts.skip;
+        continue;
+    }
+
+    log(`\n[${i + 1}/${assessments.length}] ${task.title.substring(0, 55)}`, '#00cec9');
+    log(`   ${task.subject.substring(0, 65)}`, '#666');
+
+    let grades = {};
+    let feedback = '';
+    let taskAttachments = [];
+    let submissions = [];
+    let teacherResponses = [];
+
+    try {
+        // FIND LIVE ROW
+        setPhase('Scrolling');
+
+        let found = findLiveRow(task.title, task.occurrenceIndex);
+
+        if (!found) {
+            await sleep(2200);
+            found = findLiveRow(task.title, task.occurrenceIndex);
+        }
+
+        if (!found) {
+            log('Row not found', '#e17055');
+            processedSet.add(taskKey);
+            counts.err++;
+            ui.err.textContent = counts.err;
+            continue;
+        }
+
+        const { launcher, row } = found;
+
+        if (row) {
+            row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        await sleep(CFG.scrollPause);
+
+        // OPEN MODAL
+        setPhase('Opening');
+
+        const prevModal = getActiveModal();
+        const doClick = () => launcher.dispatchEvent(new MouseEvent('click', {
+            bubbles: true,
+            cancelable: true,
+            view: window
+        }));
+
+        doClick();
+        let modal;
+
+        try {
+            modal = await waitForNewModal(prevModal);
+        } catch {
+            log('Retry…', '#fdcb6e');
+            await sleep(CFG.retryDelay);
+            doClick();
+
+            try {
+                modal = await waitForNewModal(getActiveModal());
+            } catch (e2) {
+                log(`${e2.message}`, '#e17055');
+                processedSet.add(taskKey);
+                counts.err++;
+                ui.err.textContent = counts.err;
+
+                const stray = getActiveModal();
+                if (stray) {
+                    await closeModal(stray);
+                }
+                continue;
+            }
+        }
+
+        await waitForModalContent(modal);
+        log('Modal open', '#00b894');
+
+        // TASK DETAILS
+        setPhase('Task Details');
+        await waitForTabStable(modal, 5000);
+
+        taskAttachments = extractTaskAttachments(modal);
+
+        if (taskAttachments.length) {
+            log(`${taskAttachments.length} attachment URL(s) queued`, '#a29bfe');
+
+            for (const file of taskAttachments) {
+                if (!running) break;
+                await fetchAndStoreFile(file);
+            }
+        }
+
+        // SUBMISSIONS
+        setPhase('Submissions');
+        submissions = await extractSubmissionFiles(modal);
+
+        // FEEDBACK
+        setPhase('Feedback tab');
+        const hasFeedback = await clickTab(modal, 'feedback');
+
+        if (hasFeedback) {
+            ({ grades, feedback } = extractGradesAndFeedback(modal));
+            log(`Grades: ${Object.keys(grades).length} | Feedback: ${feedback ? feedback.length + ' chars' : 'none'}`, '#888');
+
+            // TEACHER RESPONSES
+            setPhase('Teacher responses');
+            teacherResponses = await extractTeacherResponses(modal);
+        } else {
+            log('No Feedback tab', '#fdcb6e');
+        }
+
+        // SAVE RESULT
+        results.push({
+            subject: task.subject,
+            title: task.title,
+            dueDate: task.dueDate,
+            gridResult: task.gridResult,
+            grades,
+            feedback,
+            taskAttachments,
+            submissions,
+            teacherResponses
+        });
+
+        processedSet.add(taskKey);
+        counts.done++;
+        ui.done.textContent = counts.done;
+
+        taskTimings.push(Date.now() - taskStart);
+        updateETA(assessments.length - i - 1);
+
+        log('Saved', '#00b894');
+
+        // CLOSE MODAL
+        setPhase('Closing');
+        await closeModal(modal);
+        await sleep(CFG.betweenTasks);
+
+    } catch (err) {
+        log(`${err.message}`, '#e17055');
+        counts.err++;
+        ui.err.textContent = counts.err;
+
+        const stray = getActiveModal();
+        if (stray) {
+            await closeModal(stray);
+        }
+
+        document.body.dispatchEvent(
+            new KeyboardEvent('keydown', {
+                key: 'Escape',
+                keyCode: 27,
+                bubbles: true
+            })
+        );
+
+        processedSet.add(taskKey);
+        await sleep(1500);
+    }
+}
+
+// ════════════════════════════════════════════════════════════════
+// § 15 — STOP TIMER
+// ════════════════════════════════════════════════════════════════
+
+clearInterval(timerInterval);
+running = false;
+
+setPhase('Building ZIP…', '#a29bfe');
+ui.stop.style.display = 'none';
+ui.bar.style.width = '100%';
+ui.eta.textContent = '—';
+
+// ════════════════════════════════════════════════════════════════
+// § 16 — ADD FETCHED FILES TO ZIP
+// ════════════════════════════════════════════════════════════════
+
+log('\n== ADDING FETCHED FILES TO ZIP ==', '#00cec9');
+
+for (const task of results) {
+    const subj = sanitizePath(task.subject);
+    const titl = sanitizePath(task.title);
+    const base = `${subj}/${titl}`;
+
+    const allFiles = [
+        ...task.taskAttachments.map(f => ({ ...f, folder: `${base}/Task Attachments` })),
+        ...task.submissions.map(f => ({ ...f, folder: `${base}/My Submission` })),
+        ...task.teacherResponses.map(f => ({ ...f, folder: `${base}/Teacher Responses` }))
+    ];
+
+    for (const f of allFiles) {
+        if (!f.buffer || !f.fetched) {
+            if (!f.reason) {
+                f.reason = 'File was not fetched';
+            }
+            f.fetched = false;
+            continue;
+        }
+
+        try {
+            const name = sanitizePath(f.filename);
+            zip.file(`${f.folder}/${name}`, f.buffer);
+
+            fileCount++;
+            ui.files.textContent = fileCount;
+            log(`Added ${name.substring(0, 50)}`, '#00b894');
+        } catch (e) {
+            f.fetched = false;
+            f.reason = `ZIP error: ${e.message}`;
+            log(`${f.filename.substring(0, 40)} — ${e.message}`, '#e17055');
+        }
+    }
+}
+
+// ════════════════════════════════════════════════════════════════
+// § 16A — CREATE ONE HTML SUMMARY PER SUBJECT
+// ════════════════════════════════════════════════════════════════
+
+const dateStr = new Date().toISOString().slice(0, 10);
+const subjectsForSummary = [...new Set(results.map(t => t.subject))].sort();
+
+for (const subject of subjectsForSummary) {
+    const subjectTasks = results.filter(t => t.subject === subject);
+    const subjectFolder = sanitizePath(subject);
+    const summaryName = `${subjectFolder}_Summary.html`;
+    const subjectHTML = generatePortfolioHTML(subjectTasks, subject);
+
+    zip.file(`${subjectFolder}/${summaryName}`, subjectHTML);
+    log(`Added ${summaryName}`, '#00b894');
+}
+
+// ════════════════════════════════════════════════════════════════
+// § 16B — FINAL ZIP DOWNLOAD
+// ════════════════════════════════════════════════════════════════
+
+log('\nCreating final ZIP…', '#a29bfe');
+setPhase('Creating ZIP…', '#a29bfe');
+
+try {
+    const blob = await zip.generateAsync({
+        type: 'blob',
+        compression: 'DEFLATE',
+        compressionOptions: { level: 6 }
+    });
+
+    const zipUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+
+    a.href = zipUrl;
+    a.download = `Compass_Portfolio_${dateStr}.zip`;
+    a.style.display = 'none';
+
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    setTimeout(() => { URL.revokeObjectURL(zipUrl); }, 60000);
+
+    log('ZIP downloaded (per-subject summaries + all fetched files)', '#00b894');
+    setPhase('Finished', '#00b894');
+
+    alert(
+        `Done!\n${results.length} assessments · ${fileCount} files\n\n` +
+        `Only the final ZIP was downloaded.`
+    );
+} catch (e) {
+    log(`ZIP failed: ${e.message}`, '#e17055');
+    setPhase('ZIP failed', '#e17055');
+    alert('Failed to create ZIP. Check the console.');
+}
+
+setTimeout(() => dash?.remove(), 8000);
+
+// ════════════════════════════════════════════════════════════════
+// § 17 — SUBJECT HTML GENERATOR
+// ════════════════════════════════════════════════════════════════
+
+function generatePortfolioHTML(data, subjectName = '') {
+    const subjects = [...new Set(data.map(t => t.subject))].sort();
+
+    const resultColour = r => {
+        if (!r) return '#95a5a6';
+        const l = r.toLowerCase();
+        if (l.includes('well above')) return '#8e44ad';
+        if (l.includes('above')) return '#27ae60';
+        if (l.includes('at the')) return '#2980b9';
+        if (l.includes('towards') || l.includes('below')) return '#e67e22';
+        if (/^\d{2,3}$/.test(r.trim())) return '#16a085';
+        return '#7f8c8d';
+    };
+
+    const esc = s =>
+        String(s || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+
+    const renderFileList = (files, label, iconLabel, folder) => {
+        if (!files || !files.length) return '';
+
+        return `
+<div class="sec-lbl">${label}</div>
+<div class="file-list">
+  <p class="file-note">
+    Location in ZIP: <code>${esc(folder)}/</code>
+  </p>
+  ${files.map(f => `
+    <div class="file-item ${f.fetched === false ? 'file-fail' : ''}">
+      <span class="file-status">${f.fetched === false ? 'x' : 'v'}</span>
+      <span class="file-name">${esc(f.filename)}</span>
+      ${f.fetched === false && f.reason ? `<span class="file-reason">${esc(f.reason)}</span>` : ''}
+    </div>`).join('')}
+</div>`;
+    };
+
+    const bodyHTML = data.map(t => {
+        const isExam = /^\d{2,3}$/.test((t.gridResult || '').trim());
+        const gRows = Object.entries(t.grades);
+        const subj = sanitizePath(t.subject);
+        const titl = sanitizePath(t.title);
+
+        return `
+<div class="task-card${isExam ? ' task-exam' : ''}">
+  <div class="task-header">
+    <div class="task-title">${esc(t.title)}</div>
+    <div class="task-meta">Due: ${t.dueDate}</div>
+    ${t.gridResult ? `
+    <div class="task-result" style="color:${resultColour(t.gridResult)}">
+      ${isExam ? 'Exam score: ' : ''}${t.gridResult}
+    </div>` : ''}
+  </div>
+
+  <div class="task-body">
+    <div class="sec-lbl">Assessment Results</div>
+    ${gRows.length ? `
+      <table class="grade-table">
+        ${gRows.map(([k, v]) => `
+          <tr>
+            <td class="gk">${esc(k)}</td>
+            <td class="gv">${esc(v)}</td>
+          </tr>`).join('')}
+      </table>` : `
+      <p class="empty-note">
+        No detailed breakdown${t.gridResult ? ` (overall: ${t.gridResult})` : ''}
+      </p>`}
+
+    ${t.feedback ? `
+      <div class="sec-lbl">Teacher Feedback</div>
+      <div class="feedback-box">
+        ${esc(t.feedback).replace(/\n/g, '<br>')}
+      </div>` : ''}
+
+    ${renderFileList(t.taskAttachments, 'Task Attachments', 'Attachments', `${subj}/${titl}/Task Attachments`)}
+    ${renderFileList(t.submissions, 'My Submission', 'Submissions', `${subj}/${titl}/My Submission`)}
+    ${renderFileList(t.teacherResponses, 'Teacher Responses', 'Responses', `${subj}/${titl}/Teacher Responses`)}
+  </div>
+</div>`;
+    }).join('');
+
+    const subjectLabel = subjectName || subjects.join(', ') || 'Subject';
+    const withGrades = data.filter(t => Object.keys(t.grades).length > 0).length;
+    const withFeedback = data.filter(t => t.feedback).length;
+    const totalFiles = data.reduce((n, t) =>
+        n + (t.taskAttachments?.length || 0) + (t.submissions?.length || 0) + (t.teacherResponses?.length || 0), 0
+    );
+
+    const genDate = new Date().toLocaleDateString('en-AU', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+    });
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${esc(subjectLabel)} Summary</title>
+<style>
+*,*::before,*::after{box-sizing:border-box}
+:root{--pri:#2c3e50;--acc:#e67e22;--bg:#edf2f7;--card:#fff;--bdr:#e2e8f0;--purple:#8e44ad}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--pri);margin:0;padding:30px;line-height:1.6}
+.page-header{text-align:center;margin-bottom:28px;padding-bottom:18px;border-bottom:3px solid var(--acc)}
+.page-header h1{font-size:1.9rem;margin:0 0 5px}
+.gen-date{color:#718096;font-size:.86rem}
+.summary-bar{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-bottom:32px}
+.pill{background:var(--card);padding:11px 20px;border-radius:25px;box-shadow:0 2px 8px rgba(0,0,0,.06);text-align:center;min-width:100px}
+.pill-num{font-size:1.6rem;font-weight:700;color:var(--acc)}
+.pill-lbl{font-size:.74rem;color:#718096;margin-top:2px}
+.subject-section{margin-bottom:28px}
+.subject-header{background:var(--pri);color:#fff;padding:12px 18px;border-radius:8px 8px 0 0;display:flex;align-items:center;gap:10px;font-weight:600;font-size:.97rem}
+.subj-name{flex:1}
+.subj-count{font-size:.75rem;opacity:.6;font-weight:400}
+.task-card{background:var(--card);border-left:5px solid var(--acc);margin-bottom:2px;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.task-card.task-exam{border-left-color:var(--purple)}
+.task-card:last-child{border-radius:0 0 8px 8px;margin-bottom:0}
+.task-header{padding:12px 18px;border-bottom:1px solid var(--bdr)}
+.task-title{font-size:.96rem;font-weight:600;color:var(--pri)}
+.task-meta{font-size:.79rem;color:#718096;margin-top:3px}
+.task-result{font-size:.83rem;font-weight:700;margin-top:4px}
+.task-body{padding:12px 18px 16px}
+.sec-lbl{font-size:.71rem;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:#a0aec0;margin:14px 0 6px;padding-bottom:3px;border-bottom:1px solid var(--bdr)}
+.sec-lbl:first-child{margin-top:0}
+.grade-table{width:100%;border-collapse:collapse;font-size:.87rem}
+.gk{padding:8px 12px;border-bottom:1px solid var(--bdr);color:#4a5568;width:42%;background:#f7fafc;font-weight:500}
+.gv{padding:8px 12px;border-bottom:1px solid var(--bdr);font-weight:700;color:var(--pri)}
+.feedback-box{background:#fffaf0;border-left:4px solid #f6ad55;padding:12px 15px;font-size:.9rem;color:#4a5568;line-height:1.75}
+.file-list{margin-top:4px}
+.file-note{font-size:.81rem;color:#718096;margin:0 0 5px;font-style:italic}
+.file-note code{background:#f0f0f0;padding:1px 5px;border-radius:3px;font-size:.77rem}
+.file-item{display:flex;align-items:flex-start;gap:7px;padding:5px 8px;margin:3px 0;background:#f9f9fc;border-radius:5px;font-size:.84rem;border:1px solid var(--bdr);flex-wrap:wrap}
+.file-item.file-fail{opacity:.55}
+.file-status{font-weight:bold;min-width:14px}
+.file-name{flex:1}
+.file-reason{font-size:.75rem;color:#e74c3c;width:100%;margin-top:2px}
+.empty-note{color:#a0aec0;font-style:italic;font-size:.85rem;margin:4px 0}
+@media print{
+  body{background:#fff;padding:15px}
+  .task-card,.subject-section{break-inside:avoid}
+}
+</style>
+</head>
+<body>
+<div class="page-header">
+  <h1>${esc(subjectLabel)} Summary</h1>
+  <div class="gen-date">Generated ${genDate}</div>
+</div>
+<div class="summary-bar">
+  <div class="pill">
+    <div class="pill-num">${data.length}</div>
+    <div class="pill-lbl">Assessments</div>
+  </div>
+  <div class="pill">
+    <div class="pill-num">${withGrades}</div>
+    <div class="pill-lbl">Graded</div>
+  </div>
+  <div class="pill">
+    <div class="pill-num">${withFeedback}</div>
+    <div class="pill-lbl">Feedback</div>
+  </div>
+  <div class="pill">
+    <div class="pill-num">${totalFiles}</div>
+    <div class="pill-lbl">Files (in ZIP)</div>
+  </div>
+</div>
+${bodyHTML}
+</body>
+</html>`;
+}
+
+})();
