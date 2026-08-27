@@ -2,7 +2,7 @@
 
 A powerful, automated JavaScript console script designed to scrape assessment data, grades, teacher feedback, rubrics, and file attachments across multiple subjects from **Compass Education**, packaging everything into a clean HTML portfolio dashboard and a downloadable ZIP archive.
 ## Known Bugs
-When ran the code sometimes does not block the downloads prompts when calling for downloading, please cancel any downloads apart from the final .zip that get's queued at the end of the script!
+It doesn't work 😭
 
 ---
 
