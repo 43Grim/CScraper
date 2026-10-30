@@ -41,37 +41,17 @@ Compass shows learning tasks 20 at a time, forgets your filters on every refresh
 </tr>
 </table>
 
-## Quick start
+## Getting started
 
-You need **Python 3.10+**. [uv](https://docs.astral.sh/uv/) is recommended.
-
-```bash
-git clone https://github.com/<you>/compass-scraper.git
-cd compass-scraper
-uv run compass-gui
-```
-
-<details>
-<summary>Using pip instead of uv</summary>
-
-```bash
-python -m venv .venv
-# Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
-pip install -e .
-compass-gui
-```
-</details>
-
-Then:
-
-1. **Sign in to Compass in your normal browser.** Firefox is the most reliable choice.
-2. In the app, click **Sign in…**, pick that browser and click **Use my browser's session**.
-3. Open **Sync**, tick the years you want and click **Sync now**.
-4. Use **Overview** and **Browse** to look through everything. Your files are in `~/Documents/Compass Portfolio` by default.
+1. Download the app for your system from [**Releases**](../../releases/latest) and open it.
+2. **Sign in to Compass in your normal browser.** Firefox is the most reliable choice.
+3. In the app, click **Sign in…**, pick that browser and click **Use my browser's session**.
+4. Open **Sync**, tick the years you want and click **Sync now**.
+5. Use **Overview** and **Browse** to look through everything. Your files are in `~/Documents/Compass Portfolio` by default.
 
 > Sign-in not working? Click **Diagnose…** in the sign-in window. It reports cookie *names* only, never their values. As a fallback, use **Paste cookie instead…**: in Compass, press F12, open Network, reload, click any request and copy the `Cookie` header.
 
-### Keyboard shortcuts
+## Keyboard shortcuts
 
 | Keys | Action |
 |---|---|
