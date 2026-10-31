@@ -42,7 +42,7 @@ def test_session_from_browser_tries_each(monkeypatch, server, tmp_path):
     real_make = auth.make_session
     monkeypatch.setattr(auth, "make_session", lambda h, c, user_id=None: real_make(h, c, user_id, base_url=server))
     s = auth.session_from_browser("127.0.0.1", "Auto", log=lambda m: None)
-    assert s.user_id == USER and calls[:3] == ["Firefox", "Chrome", "Chromium"]
+    assert s.user_id == USER and calls[:5] == ["Firefox", "Zen", "Chrome", "Arc", "Chromium"]
 
 
 @pytest.mark.skipif(not os.environ.get("QT_QPA_PLATFORM"), reason="set QT_QPA_PLATFORM=offscreen to run the GUI test")
@@ -148,3 +148,29 @@ def test_desktop_install(monkeypatch, tmp_path):
     assert (tmp_path / "icons/hicolor/scalable/apps/compass-scraper.svg").exists()
     desktop.uninstall()
     assert not entry.exists()
+
+
+def test_macos_profiles_and_safari(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(auth, "MAC", True)
+    sup = tmp_path / "Library" / "Application Support"
+    for rel in ("Firefox/Profiles/abc.default-release", "zen/Profiles/xyz.Default (release)"):
+        (sup / rel).mkdir(parents=True)
+        (sup / rel / "cookies.sqlite").write_bytes(b"")
+    (sup / "Google/Chrome/Profile 1").mkdir(parents=True)
+    (sup / "Google/Chrome/Profile 1/Cookies").write_bytes(b"")
+    safari = tmp_path / "Library/Containers/com.apple.Safari/Data/Library/Cookies"
+    safari.mkdir(parents=True)
+    (safari / "Cookies.binarycookies").write_bytes(b"")
+    assert [p.parent.name for p in auth._profile_cookie_files("Zen")] == ["xyz.Default (release)"]
+    assert len(auth._profile_cookie_files("Firefox")) == 1 and len(auth._profile_cookie_files("Chrome")) == 1
+    assert auth._profile_cookie_files("Safari")[0].name == "Cookies.binarycookies"
+    assert "Safari" in auth.supported_browsers()
+
+    import browser_cookie3
+
+    def blocked(**kw):
+        raise PermissionError("Operation not permitted")
+    monkeypatch.setattr(browser_cookie3, "safari", blocked)
+    with pytest.raises(Exception, match="Full Disk Access"):
+        auth.cookies_from_browser("example.compass.education", "Safari")

@@ -9,7 +9,7 @@
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![PySide6](https://img.shields.io/badge/GUI-PySide6-41cd52)
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
-![Version](https://img.shields.io/badge/version-0.5.3-informational)
+![Version](https://img.shields.io/badge/version-0.5.4-informational)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/overview-dark.png">
@@ -25,7 +25,7 @@ Compass shows learning tasks 20 at a time, forgets your filters on every refresh
 ## Features
 
 - **Everything in one place.** You get every grade row (subject grade, Performance, Effort) and the full **Comment (Open)** teacher feedback with its line breaks. Rubrics come with your awarded levels highlighted, along with task descriptions, attachments, your submissions and the teacher's response files.
-- **Simple sign-in.** Sign in to Compass in Firefox, Chrome, Brave, Edge and so on as you normally would, CAPTCHA included, and the app picks up that session. You never type your password into it.
+- **Simple sign-in.** Click **Sign in here** and sign in to Compass in a browser window inside the app. This works the same on Windows, macOS and Linux. Or sign in in your own browser (Firefox, Zen, Safari, Chrome, Brave, Edge, Arc and so on) and the app picks up that session. Either way, you type your password into Compass itself, never into the app.
 - **What's new.** Each sync flags new tasks, newly released results, new feedback, rubric marks, new files and changed due dates. Unread tasks get a blue dot until you open them.
 - **Overview.** See what's new, what's overdue or coming up, your latest results and a per-subject summary at a glance.
 - **Task status.** Every task is marked **Graded**, **Submitted**, **Done**, **Overdue**, **Due soon** or **Pending**. Tasks with a result or an uploaded file count as complete automatically, and you can mark the rest done yourself.
@@ -55,12 +55,20 @@ Compass shows learning tasks 20 at a time, forgets your filters on every refresh
 
 ## Getting started
 
+<<<<<<< HEAD
 1. Download the app for your system from [**Releases**](../../releases/latest), extract and open it.
 2. **Fully sign out of Compass in your normal browser and fully close it** Firefox is the most reliable choice.
 3. **Re-open and sign into Compass, close and re-open your browser afterwards.**
 4. In the app, click **Sign in…**, pick that browser and click **Use my browser's session**.
 5. Open **Sync**, tick the years you want and click **Sync now**.
 6. Use **Overview**, **Timeline**, **Performance** and **Browse** to look through everything. Your files are in `~/Documents/Compass Portfolio` by default.
+=======
+1. Download the app for your system from [**Releases**](../../releases/latest) and open it.
+2. In the app, click **Sign in…**, then **Sign in here**, and sign in to Compass in the window that opens. It closes by itself once you're in.
+3. (Or sign in to Compass in your own browser, pick it in the list and click **Use my browser's session**.)
+4. Open **Sync**, tick the years you want and click **Sync now**.
+5. Use **Overview**, **Timeline**, **Performance** and **Browse** to look through everything. Your files are in `~/Documents/Compass Portfolio` by default.
+>>>>>>> 7b711e7 (0.5.4)
 
 > Sign-in not working? Click **Diagnose…** in the sign-in window. It reports cookie *names* only, never their values. As a fallback, use **Paste cookie instead…**: in Compass, press F12, open Network, reload, click any request and copy the `Cookie` header.
 
@@ -139,7 +147,8 @@ The result is in `dist/`. To build Windows, macOS and Linux versions together, r
 
 Notes for each platform:
 
-- **Windows:** recent Chrome and Edge versions lock their cookies, so use Firefox or **Paste cookie instead…**.
+- **Windows:** recent Chrome and Edge versions lock their cookies. Use **Sign in here**, Firefox or Zen instead.
+- **macOS:** to read Safari's cookies, Compass Scraper needs Full Disk Access (System Settings → Privacy & Security). For Chrome, Brave, Edge or Arc, click **Always Allow** when macOS asks about "Safe Storage". **Sign in here** needs neither.
 - **macOS:** the build is unsigned, so the first time you open it, right-click it and choose **Open**.
 
 ## How it works

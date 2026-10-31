@@ -1,4 +1,4 @@
-## Compass Scraper 0.5.3
+## Compass Scraper 0.5.4
 
 Timeline, performance graphs, task status and search everywhere.
 
@@ -6,9 +6,9 @@ Timeline, performance graphs, task status and search everywhere.
 
 | System | File |
 |---|---|
-| Windows 10/11 | `Compass-Scraper-0.5.3-Windows.zip`: unzip it, then run `Compass Scraper.exe` |
-| macOS | `Compass-Scraper-0.5.3-macOS.zip`: unzip it, then right-click **Compass Scraper.app** and choose **Open** the first time (the app isn't signed) |
-| Linux | `Compass-Scraper-0.5.3-Linux.tar.gz`: extract it and run `Compass Scraper/Compass Scraper` |
+| Windows 10/11 | `Compass-Scraper-0.5.4-Windows.zip`: unzip it, then run `Compass Scraper.exe` |
+| macOS | `Compass-Scraper-0.5.4-macOS.zip`: unzip it, then right-click **Compass Scraper.app** and choose **Open** the first time (the app isn't signed) |
+| Linux | `Compass-Scraper-0.5.4-Linux.tar.gz`: extract it and run `Compass Scraper/Compass Scraper` |
 
 ### New
 
@@ -30,6 +30,9 @@ Timeline, performance graphs, task status and search everywhere.
 
 ### Fixes
 
+- **Sign in here:** a new sign-in window inside the app. You sign in to Compass there, and it works on Windows, macOS and Linux without reading any other browser.
+- **macOS sign-in:** the app now finds Firefox, Zen, Chrome, Brave, Edge, Arc, Vivaldi and Opera profiles on a Mac, and adds Safari. Clear messages explain macOS's Full Disk Access and Keychain prompts.
+- **Zen browser:** now supported on every system.
 - Bare numbers too big to be a level score (e.g. 100 or 82) now count as percentages, so they go to SACs or Exams, never VCE Number Scores.
 - Average by subject now scrolls when you have lots of subjects, and scroll bars match the theme.
 - Input boxes on the Sync page are now the same height.
@@ -37,5 +40,5 @@ Timeline, performance graphs, task status and search everywhere.
 
 ### Known issues
 
-- **Windows:** recent Chrome and Edge lock their cookies, so the app can't read your session from them. Use Firefox, or **Paste cookie instead…** in the sign-in window.
+- **Windows:** recent Chrome and Edge lock their cookies, so the app can't read your session from them. Use **Sign in here**, Firefox or Zen.
 - Tasks without an online submission (for example, in-class tests) show as Overdue until a result comes out. Use **Mark done** for those.

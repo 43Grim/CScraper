@@ -15,7 +15,8 @@ from PySide6.QtWidgets import (
 )
 
 from . import __version__, changes, desktop, theme
-from .auth import BROWSERS, diagnose, forget_session, load_session, save_session, session_from_browser, session_from_cookie_header
+from . import webauth
+from .auth import BROWSERS, diagnose, supported_browsers, forget_session, load_session, save_session, session_from_browser, session_from_cookie_header
 from .browse import BrowsePage
 from .overview import Overview
 from .performance import PerformancePage
@@ -97,24 +98,30 @@ class SignInDialog(QDialog):
         v = QVBoxLayout(self)
         v.setSpacing(10)
         v.addWidget(_label("Sign in to Compass", "pageTitle"))
-        v.addWidget(_label("1. Sign in to Compass in your normal browser, CAPTCHA and all.\n"
-                           "2. Pick that browser below and click “Use my browser's session”.", "muted", wrap=True))
+        v.addWidget(_label("Easiest: click “Sign in here” and sign in to Compass in the window that opens.\n"
+                           "Or sign in to Compass in your normal browser, pick it below and click “Use my browser's session”.",
+                           "muted", wrap=True))
         form = QFormLayout()
         self.host = QLineEdit(settings.value("host", DEFAULT_HOST))
         self.browser = QComboBox()
-        self.browser.addItems(["Auto"] + list(BROWSERS))
+        self.browser.addItems(["Auto"] + supported_browsers())
         self.browser.setCurrentText(settings.value("browser", "Auto"))
         form.addRow("School address", self.host)
         form.addRow("Browser", self.browser)
         v.addLayout(form)
 
         row = QHBoxLayout()
+        self.here = QPushButton("Sign in here")
+        self.here.setToolTip("Opens Compass in a window inside the app. Works on every computer and browser.")
+        self.here.clicked.connect(self._sign_in_here)
+        self.here.setVisible(webauth.available())
         open_btn = QPushButton("Open Compass (default browser)")
         open_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(f"https://{self.host_value()}/")))
         self.grab = QPushButton("Use my browser's session")
         self.grab.setObjectName("primary")
         self.grab.setDefault(True)
         self.grab.clicked.connect(self._grab)
+        row.addWidget(self.here)
         row.addWidget(open_btn)
         row.addStretch(1)
         row.addWidget(self.grab)
@@ -173,6 +180,13 @@ class SignInDialog(QDialog):
                       "“Diagnose…” and send the report.")
         self.job = start_job(self, grab, self._accept_session, fail)
         self.job.log.connect(self._say)
+
+    def _sign_in_here(self):
+        dlg = webauth.WebSignIn(self.host_value(), start_job, self)
+        if dlg.exec() == QDialog.Accepted and dlg.session:
+            self._say(f"Signed in as {dlg.session.user_name or dlg.session.user_id}.")
+            self.browser.setCurrentText("Auto")
+            self._accept_session(dlg.session)
 
     def _paste(self):
         text, ok = QInputDialog.getMultiLineText(
@@ -703,6 +717,9 @@ class MainWindow(QMainWindow):
 
 
 def main() -> int:
+    QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)  # needed by the "Sign in here" web view
+    if webauth.available():
+        import PySide6.QtWebEngineWidgets  # noqa: F401  (must load before the QApplication exists)
     app = QApplication(sys.argv)
     app.setApplicationName("Compass Scraper")
     app.setApplicationVersion(__version__)

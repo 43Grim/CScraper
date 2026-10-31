@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "compass-scraper"
-version = "0.5.3"
+version = "0.5.4"
 description = "Download Compass Education learning tasks, grades, feedback, rubrics and files into an HTML portfolio."
 requires-python = ">=3.10"
 dependencies = ["requests>=2.31", "rich>=13", "browser-cookie3>=0.19", "PySide6>=6.6"]

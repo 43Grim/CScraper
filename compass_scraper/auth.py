@@ -24,7 +24,10 @@ from .client import USER_AGENT, CompassClient, CompassError, Session, SessionExp
 # Display name -> browser_cookie3 loader name, in the order "Auto" tries them.
 BROWSERS = {
     "Firefox": "firefox",
+    "Zen": "firefox",          # Firefox-based, same cookie format
+    "Safari": "safari",
     "Chrome": "chrome",
+    "Arc": "arc",
     "Chromium": "chromium",
     "Brave": "brave",
     "Edge": "edge",
@@ -70,6 +73,10 @@ def _for_host(host: str, cookies: list[dict]) -> list[dict]:
     return [c for c in cookies if host.endswith((c.get("domain") or host).lstrip("."))]
 
 
+MAC = sys.platform == "darwin"
+WINDOWS = sys.platform.startswith("win")
+_MAC_SUPPORT = "~/Library/Application Support"
+
 # Linux config folders of Chromium-based browsers. Every profile in every matching
 # folder is tried, which also covers variants such as Brave Beta / Nightly / Origin.
 _LINUX_DIRS = {
@@ -90,10 +97,54 @@ _FIREFOX_DIRS = {
 }
 
 
+_FIREFOX_DIRS["Zen"] = ["~/.zen", "~/.var/app/app.zen_browser.zen/.zen", "~/.config/zen"]
+
+# macOS: Firefox-family profiles live in .../Profiles, Chromium-family in per-browser folders.
+_MAC_FIREFOX_DIRS = {
+    "Firefox": [f"{_MAC_SUPPORT}/Firefox/Profiles"],
+    "Zen": [f"{_MAC_SUPPORT}/zen/Profiles"],
+    "LibreWolf": [f"{_MAC_SUPPORT}/librewolf/Profiles"],
+}
+_MAC_DIRS = {
+    "Chrome": [f"{_MAC_SUPPORT}/Google/Chrome*"],
+    "Arc": [f"{_MAC_SUPPORT}/Arc/User Data"],
+    "Chromium": [f"{_MAC_SUPPORT}/Chromium"],
+    "Brave": [f"{_MAC_SUPPORT}/BraveSoftware/Brave-Browser*"],
+    "Edge": [f"{_MAC_SUPPORT}/Microsoft Edge*"],
+    "Vivaldi": [f"{_MAC_SUPPORT}/Vivaldi"],
+    "Opera": [f"{_MAC_SUPPORT}/com.operasoftware.Opera*"],
+}
+_WIN_FIREFOX_DIRS = {
+    "Firefox": [r"%APPDATA%\Mozilla\Firefox\Profiles"],
+    "Zen": [r"%APPDATA%\zen\Profiles"],
+    "LibreWolf": [r"%APPDATA%\librewolf\Profiles"],
+}
+SAFARI_FILES = ["~/Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies",
+                "~/Library/Cookies/Cookies.binarycookies"]
+
+
+def supported_browsers() -> list[str]:
+    """Browsers worth offering on this computer."""
+    return [b for b in BROWSERS if b != "Safari" or MAC]
+
+
 def _profile_cookie_files(browser: str) -> list[Path]:
+    files = set()
+    if browser == "Safari":
+        return [Path(os.path.expanduser(f)) for f in SAFARI_FILES if os.path.exists(os.path.expanduser(f))][:1] if MAC else []
+    if MAC or WINDOWS:
+        fx = _MAC_FIREFOX_DIRS if MAC else _WIN_FIREFOX_DIRS
+        for pattern in fx.get(browser, []):
+            root = os.path.expandvars(os.path.expanduser(pattern))
+            files.update(Path(f) for f in glob.glob(os.path.join(glob.escape(root), "*", "cookies.sqlite")))
+        if MAC:
+            for pattern in _MAC_DIRS.get(browser, []):
+                for root in glob.glob(os.path.expanduser(pattern)):
+                    for rel in ("Default/Cookies", "Profile */Cookies", "Cookies"):
+                        files.update(Path(f) for f in glob.glob(os.path.join(glob.escape(root), rel)))
+        return sorted(files, key=lambda f: f.stat().st_mtime, reverse=True)
     if not sys.platform.startswith("linux"):
         return []
-    files = set()
     for pattern in _FIREFOX_DIRS.get(browser, []):
         files.update(Path(f) for f in glob.glob(os.path.join(os.path.expanduser(pattern), "*", "cookies.sqlite")))
     for pattern in _LINUX_DIRS.get(browser, []):
@@ -119,18 +170,39 @@ def cookies_from_browser(host: str, browser: str) -> list[tuple[str, list[dict]]
     for f in _profile_cookie_files(browser):
         try:
             cookies = to_dicts(loader(cookie_file=str(f), domain_name="compass.education"))
+        except PermissionError:
+            errors.append(_permission_hint(browser))
+            continue
         except Exception as e:
             errors.append(f"{f}: {str(e).splitlines()[0] if str(e) else type(e).__name__}")
             continue
         if cookies:
             found.append((f"{browser} ({_profile_label(f)})", cookies))
-    if not found and not _profile_cookie_files(browser):
+    if not found and not _profile_cookie_files(browser) and browser not in ("Zen", "Safari"):
         cookies = to_dicts(loader(domain_name="compass.education"))  # library's default locations (Windows / macOS / Firefox)
         if cookies:
             found.append((browser, cookies))
     if not found and errors:
         raise CompassError("; ".join(errors[:3]))
     return found
+
+
+def _permission_hint(browser: str) -> str:
+    if MAC:
+        return (f"macOS blocked access to {browser}'s cookies. Open System Settings → Privacy & Security → "
+                "Full Disk Access, turn it on for Compass Scraper (or Terminal, if you run it from there), then try again. "
+                "Or use “Sign in here” instead.")
+    return f"Permission denied reading {browser}'s cookies."
+
+
+def chromium_hint(browser: str) -> str:
+    """Why a Chromium browser's cookies might be unreadable even though they were found."""
+    if MAC:
+        return (f"If macOS asked whether Compass Scraper may use “{browser} Safe Storage”, click Always Allow. "
+                "If you clicked Deny, try again, or use Firefox, Zen, Safari or “Sign in here”.")
+    if WINDOWS:
+        return f"New versions of {browser} on Windows lock their cookies. Use Firefox, Zen or “Sign in here” instead."
+    return ""
 
 
 def parse_cookie_header(host: str, text: str) -> list[dict]:
@@ -183,7 +255,7 @@ def make_session(host: str, cookies: list[dict], user_id: int | None = None, bas
 
 def session_from_browser(host: str, browser: str = "Auto", user_id: int | None = None, log=print) -> Session:
     """Finds a signed-in Compass session in the chosen browser (or any, for "Auto")."""
-    names = list(BROWSERS) if browser == "Auto" else [browser]
+    names = supported_browsers() if browser == "Auto" else [browser]
     problems = []
     try:
         import browser_cookie3  # noqa: F401
@@ -204,7 +276,8 @@ def session_from_browser(host: str, browser: str = "Auto", user_id: int | None =
                 log(f"Found a signed-in Compass session in {where}.")
                 return session
             except CompassError as e:
-                problems.append(f"{where}: {e}")
+                hint = chromium_hint(b) if b not in ("Firefox", "Zen", "LibreWolf", "Safari") else ""
+                problems.append(f"{where}: {e} {hint}".strip())
     raise SessionExpired(
         "Couldn't find a signed-in Compass session. Sign in to Compass in your browser first.\n  " + "\n  ".join(problems)
     )
@@ -241,14 +314,18 @@ def diagnose(host: str) -> str:
         lines.append("browser_cookie3 NOT INSTALLED  ->  uv add browser-cookie3")
         return "\n".join(lines)
     lines.append(f"DBUS_SESSION_BUS_ADDRESS {'set' if os.environ.get('DBUS_SESSION_BUS_ADDRESS') else 'NOT set'}")
-    for b, fn in BROWSERS.items():
+    for b in supported_browsers():
+        fn = BROWSERS[b]
         files = _profile_cookie_files(b)
         lines.append(f"\n[{b}] {len(files)} profile cookie file(s)")
-        targets = [(str(f), {"cookie_file": str(f)}) for f in files] or [("library default location", {})]
+        targets = [(str(f), {"cookie_file": str(f)}) for f in files] or ([] if b in ("Zen", "Safari") else [("library default location", {})])
         for label, kw in targets:
             try:
                 jar = getattr(browser_cookie3, fn)(domain_name="compass.education", **kw)
                 cookies = [c for c in jar]
+            except PermissionError:
+                lines.append(f"  {label}: BLOCKED by macOS privacy settings (needs Full Disk Access)")
+                continue
             except Exception as e:
                 lines.append(f"  {label}: ERROR {type(e).__name__}: {str(e).splitlines()[0] if str(e) else ''}")
                 continue
