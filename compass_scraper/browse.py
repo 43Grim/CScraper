@@ -6,7 +6,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from . import changes, insights
+from . import changes, insights, theme
 
 from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QBrush, QColor, QDesktopServices, QPageLayout, QPageSize
@@ -173,13 +173,13 @@ class BrowsePage(QWidget):
         self.search.setClearButtonEnabled(True)
         self.search.setToolTip(SEARCH_HELP)
         self.search.setMinimumWidth(180)
-        self.year = QComboBox()
-        self.subject = QComboBox()
-        self.state = QComboBox()
+        self.year = theme.Combo()
+        self.subject = theme.Combo()
+        self.state = theme.Combo()
         self.state.addItem("Any status", "")
         for name in insights.STATUS_FILTERS:
             self.state.addItem(name, name)
-        self.score_type = QComboBox()
+        self.score_type = theme.Combo()
         self.only_new = QCheckBox("New")
         filters.addWidget(self.search, 3)
         filters.addWidget(self.year, 1)

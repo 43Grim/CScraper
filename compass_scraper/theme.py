@@ -5,7 +5,7 @@ import hashlib
 import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication, QComboBox, QStyledItemDelegate
 
@@ -57,32 +57,23 @@ def _check(color: str) -> str:
                  f'<path d="M2.5 6.2 L5 8.6 L9.5 3.6" fill="none" stroke="{color}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>')
 
 
-class _ComboFixer(QObject):
-    """Gives every dropdown a styled-item delegate, so its popup follows the stylesheet.
+class Combo(QComboBox):
+    """A dropdown whose popup follows the stylesheet.
 
     Qt's default combo popup delegate ignores ::item rules, which left hovered items
-    unreadable in light mode. Combo boxes also get a compact width so long entries
-    don't stretch the window.
+    unreadable in light mode. Dropdowns also get a compact width so long entries
+    don't stretch the window. (This used to be an app-wide event filter, but a Python
+    filter on every event crashes the embedded sign-in browser.)
     """
 
-    def eventFilter(self, obj, event):
-        if event.type() == QEvent.Polish and isinstance(obj, QComboBox) and not obj.property("_styled"):
-            obj.setProperty("_styled", True)
-            obj.setItemDelegate(QStyledItemDelegate(obj))
-            if obj.sizeAdjustPolicy() == QComboBox.AdjustToContentsOnFirstShow:
-                obj.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
-                obj.setMinimumContentsLength(min(obj.minimumContentsLength() or 10, 16))
-        return False
-
-
-_fixer: _ComboFixer | None = None
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setItemDelegate(QStyledItemDelegate(self))
+        self.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.setMinimumContentsLength(10)
 
 
 def apply(app: QApplication, mode: str) -> dict:
-    global _fixer
-    if _fixer is None:
-        _fixer = _ComboFixer(app)
-        app.installEventFilter(_fixer)
     c = colors_for(mode, app)
     down, up, down_muted = _chevron(c["muted"]), _chevron(c["muted"], up=True), _chevron(c["line"])
     tick = _check(c["accent_text"])

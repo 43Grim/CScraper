@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QComboBox, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QScrollArea, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
-from . import insights
+from . import insights, theme
 from .charts import BarChart, TimelineChart, series_colors
 
 
@@ -55,7 +55,7 @@ class PerformancePage(QWidget):
         title.setObjectName("pageTitle")
         top.addWidget(title)
         top.addSpacing(16)
-        self.year, self.kind, self.axis, self.category = QComboBox(), QComboBox(), QComboBox(), QComboBox()
+        self.year, self.kind, self.axis, self.category = theme.Combo(), theme.Combo(), theme.Combo(), theme.Combo()
         self.axis.addItem("By task", "index")
         self.axis.addItem("By due date", "date")
         for tip, w in (("Academic year", self.year), ("Which marks to graph", self.kind), ("X axis", self.axis),

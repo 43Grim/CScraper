@@ -6,6 +6,9 @@ profile in ~/.compass-scraper/web, so you usually stay signed in between runs.
 """
 from __future__ import annotations
 
+import importlib.util
+import os
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import QTimer, QUrl, Signal
@@ -13,13 +16,55 @@ from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLa
 
 from .auth import make_session, save_session, session_path
 
+FLAG = "--web-sign-in"
+
 
 def available() -> bool:
     try:
-        import PySide6.QtWebEngineWidgets  # noqa: F401
-        return True
-    except ImportError:
+        return importlib.util.find_spec("PySide6.QtWebEngineWidgets") is not None
+    except (ImportError, ValueError):
         return False
+
+
+def child_command(host: str) -> tuple[str, list[str]]:
+    """How to start the sign-in window as its own process (works for the frozen app too)."""
+    if getattr(sys, "frozen", False):
+        return sys.executable, [FLAG, host]
+    return sys.executable, ["-m", "compass_scraper.gui", FLAG, host]
+
+
+def child_env(safe: bool) -> dict:
+    """Environment for the sign-in process. Safe mode turns off GPU drawing and, on Linux, Wayland,
+    which are the usual reasons the embedded browser crashes on start."""
+    env = dict(os.environ)
+    if safe:
+        flags = env.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
+        env["QTWEBENGINE_CHROMIUM_FLAGS"] = (flags + " --disable-gpu --disable-gpu-compositing").strip()
+        env["QT_OPENGL"] = "software"
+        env["LIBGL_ALWAYS_SOFTWARE"] = "1"
+        if sys.platform.startswith("linux") and env.get("WAYLAND_DISPLAY") and env.get("DISPLAY"):
+            env["QT_QPA_PLATFORM"] = "xcb"
+    return env
+
+
+def child_main(host: str) -> int:
+    """Runs only the sign-in window. Exit code 0 means a working session was saved."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+
+    QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
+    import PySide6.QtWebEngineWidgets  # noqa: F401  (must load before the QApplication exists)
+    app = QApplication([sys.argv[0]])
+    app.setApplicationName("Compass Scraper")
+    from . import theme
+    from .gui import start_job
+    from PySide6.QtCore import QSettings
+    theme.apply(app, QSettings("CompassScraper", "CompassScraper").value("theme", "System"))
+    dlg = WebSignIn(host, start_job)
+    dlg.show()
+    dlg.raise_()
+    result = dlg.exec()
+    return 0 if result == QDialog.Accepted and dlg.session else 1
 
 
 class WebSignIn(QDialog):

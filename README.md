@@ -55,20 +55,11 @@ Compass shows learning tasks 20 at a time, forgets your filters on every refresh
 
 ## Getting started
 
-<<<<<<< HEAD
-1. Download the app for your system from [**Releases**](../../releases/latest), extract and open it.
-2. **Fully sign out of Compass in your normal browser and fully close it** Firefox is the most reliable choice.
-3. **Re-open and sign into Compass, close and re-open your browser afterwards.**
-4. In the app, click **Sign in…**, pick that browser and click **Use my browser's session**.
-5. Open **Sync**, tick the years you want and click **Sync now**.
-6. Use **Overview**, **Timeline**, **Performance** and **Browse** to look through everything. Your files are in `~/Documents/Compass Portfolio` by default.
-=======
 1. Download the app for your system from [**Releases**](../../releases/latest) and open it.
 2. In the app, click **Sign in…**, then **Sign in here**, and sign in to Compass in the window that opens. It closes by itself once you're in.
 3. (Or sign in to Compass in your own browser, pick it in the list and click **Use my browser's session**.)
 4. Open **Sync**, tick the years you want and click **Sync now**.
 5. Use **Overview**, **Timeline**, **Performance** and **Browse** to look through everything. Your files are in `~/Documents/Compass Portfolio` by default.
->>>>>>> 7b711e7 (0.5.4)
 
 > Sign-in not working? Click **Diagnose…** in the sign-in window. It reports cookie *names* only, never their values. As a fallback, use **Paste cookie instead…**: in Compass, press F12, open Network, reload, click any request and copy the `Cookie` header.
 

@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QMenu, QPlainTextEdit, QPushButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from . import insights
+from . import insights, theme
 from .insights import Entry
 
 ENTRY_ROLE = Qt.UserRole + 3
@@ -31,7 +31,7 @@ class ItemDialog(QDialog):
         self.when.setDisplayFormat("d MMM yyyy  h:mm ap")
         due = insights.parse_dt((item or {}).get("due"))
         self.when.setDateTime(QDateTime(due.astimezone()) if due else QDateTime.currentDateTime().addDays(1))
-        self.subject = QComboBox()
+        self.subject = theme.Combo()
         self.subject.setEditable(True)
         self.subject.addItems([""] + subjects)
         self.subject.setCurrentText((item or {}).get("subject", ""))
@@ -88,7 +88,7 @@ class TimelinePage(QWidget):
         v.addLayout(top)
 
         filters = QHBoxLayout()
-        self.subject = QComboBox()
+        self.subject = theme.Combo()
         self.show_done = QCheckBox("Completed")
         self.show_past = QCheckBox("Past")
         self.show_hidden = QCheckBox("Removed")

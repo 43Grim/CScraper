@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtCore import QProcess, QProcessEnvironment, QSettings, Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QFont, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QFrame, QGridLayout, QHBoxLayout,
@@ -103,7 +103,7 @@ class SignInDialog(QDialog):
                            "muted", wrap=True))
         form = QFormLayout()
         self.host = QLineEdit(settings.value("host", DEFAULT_HOST))
-        self.browser = QComboBox()
+        self.browser = theme.Combo()
         self.browser.addItems(["Auto"] + supported_browsers())
         self.browser.setCurrentText(settings.value("browser", "Auto"))
         form.addRow("School address", self.host)
@@ -181,12 +181,45 @@ class SignInDialog(QDialog):
         self.job = start_job(self, grab, self._accept_session, fail)
         self.job.log.connect(self._say)
 
-    def _sign_in_here(self):
-        dlg = webauth.WebSignIn(self.host_value(), start_job, self)
-        if dlg.exec() == QDialog.Accepted and dlg.session:
-            self._say(f"Signed in as {dlg.session.user_name or dlg.session.user_id}.")
-            self.browser.setCurrentText("Auto")
-            self._accept_session(dlg.session)
+    def _sign_in_here(self, safe: bool = False):
+        """Opens the sign-in browser in its own process, so if it crashes only that window closes."""
+        if getattr(self, "web_proc", None):
+            return
+        host = self.host_value()
+        self._say("Opening the sign-in window…" + (" (safe mode)" if safe else ""))
+        self.here.setEnabled(False)
+        proc = QProcess(self)
+        env = QProcessEnvironment()
+        for k, val in webauth.child_env(safe).items():
+            env.insert(k, val)
+        proc.setProcessEnvironment(env)
+        program, args = webauth.child_command(host)
+        started = time.time()
+
+        def finished(code, status):
+            self.web_proc = None
+            self.here.setEnabled(True)
+            err = bytes(proc.readAllStandardError()).decode("utf-8", "replace").strip()
+            s = load_session(host) if code == 0 and status == QProcess.NormalExit else None
+            if s:
+                self._say(f"Signed in as {s.user_name or s.user_id}.")
+                self.browser.setCurrentText("Auto")
+                self._accept_session(s)
+            elif status == QProcess.CrashExit or (code not in (0, 1)):
+                if not safe:
+                    self._say("The sign-in window crashed. Trying again in safe mode…")
+                    self._sign_in_here(safe=True)
+                else:
+                    tail = "\n".join(err.splitlines()[-6:])
+                    self._say("The sign-in window couldn't start on this computer. Use your browser's session or "
+                              "“Paste cookie instead…”." + (f"\nDetails:\n{tail}" if tail else ""))
+            elif time.time() - started > 2:
+                self._say("Sign-in window closed without signing in.")
+
+        proc.finished.connect(finished)
+        proc.errorOccurred.connect(lambda e: e == QProcess.FailedToStart and finished(-1, QProcess.CrashExit))
+        self.web_proc = proc
+        proc.start(program, args)
 
     def _paste(self):
         text, ok = QInputDialog.getMultiLineText(
@@ -629,7 +662,7 @@ class MainWindow(QMainWindow):
 
         th = QHBoxLayout()
         th.addWidget(_label("Theme", "muted"))
-        self.theme = QComboBox()
+        self.theme = theme.Combo()
         self.theme.addItems(["System", "Light", "Dark"])
         self.theme.setCurrentText(self.settings.value("theme", "System"))
         self.theme.currentTextChanged.connect(self._set_theme)
@@ -717,9 +750,8 @@ class MainWindow(QMainWindow):
 
 
 def main() -> int:
-    QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)  # needed by the "Sign in here" web view
-    if webauth.available():
-        import PySide6.QtWebEngineWidgets  # noqa: F401  (must load before the QApplication exists)
+    if webauth.FLAG in sys.argv:   # the "Sign in here" window runs as its own process
+        return webauth.child_main(sys.argv[sys.argv.index(webauth.FLAG) + 1])
     app = QApplication(sys.argv)
     app.setApplicationName("Compass Scraper")
     app.setApplicationVersion(__version__)

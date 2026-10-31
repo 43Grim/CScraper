@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from . import changes, insights
+from . import changes, insights, theme
 from .browse import fmt_date
 
 ID_ROLE = Qt.UserRole + 2
@@ -46,7 +46,7 @@ class Overview(QWidget):
         title.setObjectName("pageTitle")
         self.info = QLabel("")
         self.info.setObjectName("muted")
-        self.year = QComboBox()
+        self.year = theme.Combo()
         self.year.currentIndexChanged.connect(self.refresh)
         top.addWidget(title)
         top.addSpacing(10)
