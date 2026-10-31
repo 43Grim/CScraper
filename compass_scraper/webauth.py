@@ -42,6 +42,10 @@ def child_env(safe: bool) -> dict:
         env["QTWEBENGINE_CHROMIUM_FLAGS"] = (flags + " --disable-gpu --disable-gpu-compositing").strip()
         env["QT_OPENGL"] = "software"
         env["LIBGL_ALWAYS_SOFTWARE"] = "1"
+        # Draw everything in software and never load GLX/EGL. Some Linux setups (and the
+        # packaged app's bundled libraries) abort with "Could not initialize GLX" otherwise.
+        env["QT_QUICK_BACKEND"] = "software"
+        env["QT_XCB_GL_INTEGRATION"] = "none"
         if sys.platform.startswith("linux") and env.get("WAYLAND_DISPLAY") and env.get("DISPLAY"):
             env["QT_QPA_PLATFORM"] = "xcb"
     return env
