@@ -42,7 +42,11 @@ jobs:
       # Re-sign the whole app (ad hoc). Without this, macOS says the downloaded app is "damaged".
       - name: Sign the app (macOS)
         if: matrix.name == 'macOS'
-        run: codesign --force --deep --sign - "dist/Compass Scraper.app"
+        run: |
+          APP="dist/Compass Scraper.app"
+          xattr -cr "$APP"
+          codesign --force --deep --sign - "$APP" || echo "::warning::Re-signing the app failed, see the log above"
+          codesign --verify --deep --strict --verbose=2 "$APP" || echo "::warning::The app's signature check failed, see the log above"
       - name: Package
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
