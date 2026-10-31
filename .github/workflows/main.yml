@@ -1,0 +1,54 @@
+name: Build and release
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, name: Windows }
+          - { os: macos-latest, name: macOS }
+          - { os: ubuntu-22.04, name: Linux }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - run: uv run --with pyinstaller pyinstaller --noconfirm --windowed --name "Compass Scraper" --collect-submodules compass_scraper launch_gui.py
+      - name: Package
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          [[ "$GITHUB_REF_TYPE" == "tag" ]] || VERSION="dev"
+          OUT="Compass-Scraper-$VERSION-${{ matrix.name }}"
+          case "${{ matrix.name }}" in
+            Windows) 7z a "$OUT.zip" "./dist/Compass Scraper" > /dev/null; echo "ASSET=$OUT.zip" >> "$GITHUB_ENV" ;;
+            macOS)   ditto -c -k --keepParent "dist/Compass Scraper.app" "$OUT.zip"; echo "ASSET=$OUT.zip" >> "$GITHUB_ENV" ;;
+            Linux)   tar -czf "$OUT.tar.gz" -C dist "Compass Scraper"; echo "ASSET=$OUT.tar.gz" >> "$GITHUB_ENV" ;;
+          esac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ASSET }}
+          path: ${{ env.ASSET }}
+  release:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Compass Scraper ${{ github.ref_name }}
+          body_path: RELEASE-${{ github.ref_name }}.md
+          files: assets/*
