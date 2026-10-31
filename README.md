@@ -140,7 +140,7 @@ Notes for each platform:
 
 - **Windows:** recent Chrome and Edge versions lock their cookies. Use **Sign in here**, Firefox or Zen instead.
 - **macOS:** to read Safari's cookies, Compass Scraper needs Full Disk Access (System Settings → Privacy & Security). For Chrome, Brave, Edge or Arc, click **Always Allow** when macOS asks about "Safe Storage". **Sign in here** needs neither.
-- **macOS:** the build is unsigned, so the first time you open it, right-click it and choose **Open**.
+- **macOS:** the build isn't notarized by Apple. The first time you open it, right-click it and choose **Open**. If macOS says the app is "damaged", run `xattr -cr "/Applications/Compass Scraper.app"` in Terminal (use wherever you put the app), then open it again.
 
 ## How it works
 

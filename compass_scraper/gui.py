@@ -210,7 +210,9 @@ class SignInDialog(QDialog):
                     self._say("The sign-in window crashed. Trying again in safe mode…")
                     self._sign_in_here(safe=True)
                 else:
-                    tail = "\n".join(err.splitlines()[-6:])
+                    noise = ("Fontconfig warning", "QVulkanInstance", "GBM is not supported")
+                    lines = [l for l in err.splitlines() if l.strip() and not l.startswith(noise)]
+                    tail = "\n".join(lines[-6:])
                     self._say("The sign-in window couldn't start on this computer. Use your browser's session or "
                               "“Paste cookie instead…”." + (f"\nDetails:\n{tail}" if tail else ""))
             elif time.time() - started > 2:
