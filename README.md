@@ -130,8 +130,10 @@ uv run compass-scraper --list-years
 PyInstaller builds for the OS it runs on, so build each platform on that platform:
 
 ```bash
-uv run --with pyinstaller pyinstaller --noconfirm --windowed --name "Compass Scraper" \
-  --collect-submodules compass_scraper launch_gui.py
+uv sync
+uv pip install pyinstaller
+uv run --no-sync pyinstaller --noconfirm --windowed --name "Compass Scraper" \
+  --collect-submodules compass_scraper --collect-data compass_scraper launch_gui.py
 ```
 
 The result is in `dist/`. To build Windows, macOS and Linux versions together, run the **Build and release** workflow from the Actions tab (the builds are attached to the run), or push a tag like `v0.5.4` to also publish them as a GitHub Release.
