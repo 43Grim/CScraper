@@ -7,7 +7,7 @@ Timeline, performance graphs, task status and search everywhere.
 | System | File |
 |---|---|
 | Windows 10/11 | `Compass-Scraper-0.5.4-Windows.zip`: unzip it, then run `Compass Scraper.exe` |
-| macOS | `Compass-Scraper-0.5.4-macOS.zip`: unzip it, then right-click **Compass Scraper.app** and choose **Open** the first time (the app isn't signed) |
+| macOS | `Compass-Scraper-0.5.4-macOS.zip`: unzip it and open **Compass Scraper.app**. The app isn't notarized by Apple, so macOS blocks it the first time: open **System Settings → Privacy & Security** and click **Open Anyway** |
 | Linux | `Compass-Scraper-0.5.4-Linux.tar.gz`: extract it and run `Compass Scraper/Compass Scraper` |
 
 ### New
@@ -32,6 +32,7 @@ Timeline, performance graphs, task status and search everywhere.
 
 - **Sign in here:** a new sign-in window inside the app. You sign in to Compass there, and it works on Windows, macOS and Linux without reading any other browser.
 - **macOS sign-in:** the app now finds Firefox, Zen, Chrome, Brave, Edge, Arc, Vivaldi and Opera profiles on a Mac, and adds Safari. Clear messages explain macOS's Full Disk Access and Keychain prompts.
+- Fixed the macOS app showing as damaged, and the in-app sign-in crashing in the packaged Linux app.
 - **Zen browser:** now supported on every system.
 - Bare numbers too big to be a level score (e.g. 100 or 82) now count as percentages, so they go to SACs or Exams, never VCE Number Scores.
 - Average by subject now scrolls when you have lots of subjects, and scroll bars match the theme.
