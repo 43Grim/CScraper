@@ -39,14 +39,28 @@ jobs:
       - name: Use the system C++ library (Linux)
         if: matrix.name == 'Linux'
         run: rm -f "dist/Compass Scraper/_internal/libstdc++.so.6" "dist/Compass Scraper/_internal/libgcc_s.so.1"
-      # Re-sign the whole app (ad hoc). Without this, macOS says the downloaded app is "damaged".
+      # Sign the app ad hoc, inside out: every library first, then each framework, then the
+      # app itself. "codesign --deep" skips parts of the Qt frameworks, which leaves a broken
+      # signature, and macOS then calls the downloaded app "damaged".
       - name: Sign the app (macOS)
         if: matrix.name == 'macOS'
         run: |
           APP="dist/Compass Scraper.app"
           xattr -cr "$APP"
-          codesign --force --deep --sign - "$APP" || echo "::warning::Re-signing the app failed, see the log above"
-          codesign --verify --deep --strict --verbose=2 "$APP" || echo "::warning::The app's signature check failed, see the log above"
+          find "$APP/Contents" -type f -print0 | while IFS= read -r -d '' f; do
+            if file -b "$f" | grep -q "Mach-O"; then
+              printf '%s\t%s\n' "$(tr -cd / <<< "$f" | wc -c)" "$f"
+            fi
+          done | sort -rn | cut -f2- | while IFS= read -r f; do
+            codesign --force --sign - "$f" || echo "::warning::Couldn't sign $f"
+          done
+          find "$APP/Contents" -depth -type d \( -name "*.framework" -o -name "*.app" \) -print0 |
+            while IFS= read -r -d '' b; do
+              codesign --force --sign - "$b" || echo "::warning::Couldn't sign $b"
+            done
+          codesign --force --sign - "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP" ||
+            echo "::warning::The macOS app's signature didn't verify, so it may show as damaged"
       - name: Package
         run: |
           VERSION="${GITHUB_REF_NAME#v}"

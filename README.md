@@ -134,13 +134,13 @@ uv run --with pyinstaller pyinstaller --noconfirm --windowed --name "Compass Scr
   --collect-submodules compass_scraper launch_gui.py
 ```
 
-The result is in `dist/`. To build Windows, macOS and Linux versions together, run the **Build desktop app** workflow from the Actions tab, or push a tag like `v0.4.0`. Each build is attached to the workflow run.
+The result is in `dist/`. To build Windows, macOS and Linux versions together, run the **Build and release** workflow from the Actions tab (the builds are attached to the run), or push a tag like `v0.5.4` to also publish them as a GitHub Release.
 
 Notes for each platform:
 
 - **Windows:** recent Chrome and Edge versions lock their cookies. Use **Sign in here**, Firefox or Zen instead.
 - **macOS:** to read Safari's cookies, Compass Scraper needs Full Disk Access (System Settings → Privacy & Security). For Chrome, Brave, Edge or Arc, click **Always Allow** when macOS asks about "Safe Storage". **Sign in here** needs neither.
-- **macOS:** the build isn't notarized by Apple. The first time you open it, right-click it and choose **Open**. If macOS says the app is "damaged", run `xattr -cr "/Applications/Compass Scraper.app"` in Terminal (use wherever you put the app), then open it again.
+- **macOS:** the app isn't notarized by Apple, so macOS blocks it the first time. Open **System Settings → Privacy & Security**, scroll down and click **Open Anyway**. If macOS says the app is "damaged", run `xattr -cr "/Applications/Compass Scraper.app"` in Terminal (use wherever you put the app), then open it again.
 
 ## How it works
 
