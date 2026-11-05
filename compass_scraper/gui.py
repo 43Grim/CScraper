@@ -21,6 +21,7 @@ from .browse import BrowsePage
 from .overview import Overview
 from .performance import PerformancePage
 from .quickfind import QuickFind
+from .reports_page import ReportsPage
 from .timeline import TimelinePage
 from .client import CompassClient, Session, SessionExpired
 from .scrape import Cancelled, Progress, run
@@ -522,12 +523,14 @@ class MainWindow(QMainWindow):
         self.timeline = TimelinePage()
         self.performance = PerformancePage()
         self.browse = BrowsePage(self.colors)
+        self.reports = ReportsPage(self.settings)
         self.sync = SyncPage(self.settings)
-        for page in (self.overview, self.timeline, self.performance, self.browse, self.sync):
+        for page in (self.overview, self.timeline, self.performance, self.browse, self.reports, self.sync):
             self.pages.addWidget(page)
         for page in (self.overview, self.timeline, self.performance):
             page.c = self.colors
         self.performance.set_colors(self.colors)
+        self.reports.set_colors(self.colors)
         h.addWidget(self.pages, 1)
         self.setCentralWidget(root)
 
@@ -549,8 +552,8 @@ class MainWindow(QMainWindow):
         self._set_session(None)
         QTimer.singleShot(100, self._try_saved_session)
 
-    OVERVIEW, TIMELINE, PERFORMANCE, BROWSE, SYNC = range(5)
-    PAGE_NAMES = ("Overview", "Timeline", "Performance", "Browse", "Sync")
+    OVERVIEW, TIMELINE, PERFORMANCE, BROWSE, REPORTS, SYNC = range(6)
+    PAGE_NAMES = ("Overview", "Timeline", "Performance", "Browse", "Reports", "Sync")
 
     def _shortcuts(self):
         keys = {f"Ctrl+{i + 1}": (lambda i=i: self.nav.setCurrentRow(i)) for i in range(len(self.PAGE_NAMES))}
@@ -595,6 +598,7 @@ class MainWindow(QMainWindow):
             self._sync_now()
 
     def _load(self, out: Path) -> bool:
+        self.reports.set_root(out)
         ok = self.browse.load(out)
         self.overview.set_source(self.browse)
         if ok:
@@ -687,6 +691,7 @@ class MainWindow(QMainWindow):
         self.overview.refresh()
         self.timeline.set_colors(self.colors)
         self.performance.set_colors(self.colors)
+        self.reports.set_colors(self.colors)
 
     def _install_desktop(self):
         QApplication.setOverrideCursor(Qt.WaitCursor)

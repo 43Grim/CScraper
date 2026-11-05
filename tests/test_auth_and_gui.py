@@ -59,7 +59,7 @@ def test_gui_full_run(monkeypatch, server, tmp_path):
     settings.setValue("out", str(tmp_path / "portfolio"))
     w = gui.MainWindow(settings)
     assert w.nav.currentRow() == w.SYNC  # nothing synced yet
-    assert w.nav.count() == 5
+    assert w.nav.count() == 6
     assert w.menu_btn.text() == f"Add to {desktop.place()}"
     sess = auth.Session(host="127.0.0.1", user_id=USER, user_name="Test Student", cookies=COOKIE)
 

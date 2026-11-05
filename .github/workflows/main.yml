@@ -35,7 +35,7 @@ jobs:
       # separate one, which splits QtWebEngineCore.framework in two and makes the app unsignable.
       - run: uv pip install pyinstaller
       - name: Build
-        run: uv run --no-sync pyinstaller --noconfirm --windowed --name "Compass Scraper" --collect-submodules compass_scraper --collect-data compass_scraper launch_gui.py
+        run: uv run --no-sync pyinstaller --noconfirm --windowed --name "Compass Scraper" --collect-submodules compass_scraper --collect-data compass_scraper --collect-data pdfminer --collect-all pypdfium2 --collect-all pypdfium2_raw launch_gui.py
       # The Linux build must use the computer's own C++ library. The runner's copy is older
       # than the one on newer distros, and their graphics drivers refuse to load against it,
       # which crashes the sign-in browser.

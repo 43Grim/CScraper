@@ -9,7 +9,7 @@
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![PySide6](https://img.shields.io/badge/GUI-PySide6-41cd52)
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
-![Version](https://img.shields.io/badge/version-0.5.5-informational)
+![Version](https://img.shields.io/badge/version-0.5.6-informational)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/overview-dark.png">
@@ -37,6 +37,7 @@ Compass shows learning tasks 20 at a time, forgets your filters on every refresh
   - **VCE Number Scores (Year 11 and above):** number marks on any other task
 
   The year level comes from the digits starting the class code (for example, `10MATEA`), so a VCE subject taken early follows the Year 11 rules. If the code doesn't say, a VCE number score means Year 10 or below. Percentages, number scores and performance results are never mixed. The page also has a results table like an achievement sheet, with each mark coloured Towards, At, Above or Well above level. It shows your average per subject and a breakdown of every level result too.
+- **School reports.** Download your reports from Compass (**Reports → Download All Semester Reports**, a ZIP of PDFs) and import the ZIP on the **Reports** page. The app keeps only four things from each report: your **Victorian Curriculum levels** for each strand (coloured against the expected level), **learning behaviour** ratings for each subject and term, **class attendance** and the **teacher** for each subject. Teacher comments and everything else are ignored. It graphs your levels and behaviours over the years, and **Behaviour guide** shows the school's table of what each rating means. The data is saved in `reports.json`, so you don't need to keep the ZIP.
 - **Search and filters.** Results filter instantly as you type, by status, subject, year or score type. Use search filters like `status:overdue`, `has:rubric` or `subject:english`. **Ctrl+K** searches every task in every year from anywhere in the app. Copy a task's feedback, save it as a PDF, or open its folder.
 - **Incremental, crash-safe syncs.** Re-syncing only downloads what's missing, so you can stop a sync at any time and resume it later. Your portfolio only changes once a sync has finished, so if the app closes part-way, it stays exactly as it was.
 - **Academic years only.** HeadStart years are left out of syncing and the app.
@@ -70,7 +71,7 @@ Compass shows learning tasks 20 at a time, forgets your filters on every refresh
 | Keys | Action |
 |---|---|
 | <kbd>Ctrl</kbd>+<kbd>K</kbd> | Search everything |
-| <kbd>Ctrl</kbd>+<kbd>1</kbd> … <kbd>5</kbd> | Overview / Timeline / Performance / Browse / Sync |
+| <kbd>Ctrl</kbd>+<kbd>1</kbd> … <kbd>6</kbd> | Overview / Timeline / Performance / Browse / Reports / Sync |
 | <kbd>Ctrl</kbd>+<kbd>N</kbd> | Add a timeline item |
 | <kbd>Ctrl</kbd>+<kbd>R</kbd> or <kbd>F5</kbd> | Sync now |
 | <kbd>Ctrl</kbd>+<kbd>F</kbd> | Search in Browse |
@@ -94,6 +95,9 @@ Compass Portfolio/
 ├── data.json             everything, machine-readable
 ├── .planner.json         your timeline items and "done" marks
 ├── .seen.json            which changes you've already looked at
+├── reports.json          levels, learning behaviours, attendance and teachers from imported school reports
+├── School Reports/
+│   └── learning-behaviour-guide.png   what each learning behaviour rating means
 └── 2025 Academic/
     └── 9DIG Digital Technologies/
         └── CAT 1 - Infographic [29711]/
@@ -135,10 +139,11 @@ PyInstaller builds for the OS it runs on, so build each platform on that platfor
 uv sync
 uv pip install pyinstaller
 uv run --no-sync pyinstaller --noconfirm --windowed --name "Compass Scraper" \
-  --collect-submodules compass_scraper --collect-data compass_scraper launch_gui.py
+  --collect-submodules compass_scraper --collect-data compass_scraper --collect-data pdfminer \
+  --collect-all pypdfium2 --collect-all pypdfium2_raw launch_gui.py
 ```
 
-The result is in `dist/`. To build Windows, macOS and Linux versions together, run the **Build and release** workflow from the Actions tab (the builds are attached to the run), or push a tag like `v0.5.5` to also publish them as a GitHub Release.
+The result is in `dist/`. To build Windows, macOS and Linux versions together, run the **Build and release** workflow from the Actions tab (the builds are attached to the run), or push a tag like `v0.5.6` to also publish them as a GitHub Release.
 
 Notes for each platform:
 
@@ -177,6 +182,8 @@ compass_scraper/
 ├── insights.py   task status, score scale, planner, search filters, calendar export
 ├── timeline.py   Timeline page
 ├── performance.py  Performance page
+├── reports.py    reading the school reports ZIP (levels, behaviours, attendance, teachers)
+├── reports_page.py  Reports page
 ├── charts.py     the graphs
 ├── quickfind.py  Ctrl+K search
 ├── report.py     HTML dashboard and rubric pages

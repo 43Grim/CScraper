@@ -54,15 +54,18 @@ class TimelineChart(_Base):
         self.ticks: list[tuple[float, str]] = []
         self.hidden: set[str] = set()
         self.by_index = False
+        self.x_labels: list[str] = []    # by-index only: names for x = 1, 2, 3… (default "Task 1"…)
         self._hit: list[tuple[QPointF, dict, tuple]] = []
         self._legend: list[tuple[QRectF, str]] = []
         self._hover = None
         self.setMinimumHeight(220)
 
-    def set_data(self, series, lo, hi, ticks, message="", by_index=False):
-        """Points are (x, y, label, task_id, task_name, due). x is a datetime, or 1, 2, 3… when by_index."""
+    def set_data(self, series, lo, hi, ticks, message="", by_index=False, x_labels=None):
+        """Points are (x, y, label, task_id, task_name, due). x is a datetime, or 1, 2, 3… when by_index.
+        `due` may also be plain text for the tooltip (or empty)."""
         self.series, self.lo, self.hi, self.ticks, self.message = series, lo, hi, ticks, message
         self.by_index = by_index
+        self.x_labels = list(x_labels or [])
         self.hidden &= {s["name"] for s in series}
         self._hover = None
         self.update()
@@ -130,13 +133,21 @@ class TimelineChart(_Base):
             p.drawText(QRectF(0, yy - fm.height() / 2, left - 8, fm.height()), Qt.AlignRight | Qt.AlignVCenter, lbl)
         if self.by_index:
             n = int(x1 - 0.5)
-            wide = plot.width() / max(n, 1) > 56
+            slot = plot.width() / max(n, 1)
+            wide = slot > 56
+            label_w = max([fm.horizontalAdvance(t) for t in self.x_labels] + [1]) + 10
+            every = max(1, math.ceil(label_w / max(slot, 1)))     # skip labels that wouldn't fit
             for i in range(1, n + 1):
                 xx = X(i)
                 p.setPen(QPen(grid, 1, Qt.DotLine))
                 p.drawLine(QPointF(xx, plot.top()), QPointF(xx, plot.bottom()))
                 p.setPen(muted)
-                p.drawText(QRectF(xx - 30, plot.bottom() + 4, 60, fm.height()), Qt.AlignHCenter, f"Task {i}" if wide else str(i))
+                if i <= len(self.x_labels):
+                    if (n - i) % every == 0:     # always label the latest
+                        p.drawText(QRectF(xx - label_w / 2, plot.bottom() + 4, label_w, fm.height()), Qt.AlignHCenter,
+                                   self.x_labels[i - 1])
+                else:
+                    p.drawText(QRectF(xx - 30, plot.bottom() + 4, 60, fm.height()), Qt.AlignHCenter, f"Task {i}" if wide else str(i))
         # month labels
         d = datetime(x0.year, x0.month, 1, tzinfo=x0.tzinfo) if not self.by_index else None
         months = (x1.year - x0.year) * 12 + x1.month - x0.month + 1 if d else 0
@@ -164,7 +175,7 @@ class TimelineChart(_Base):
                 path = QPainterPath(QPointF(X(ordered[0][0]), Y(ordered[0][1])))
                 for pt in ordered[1:]:
                     path.lineTo(QPointF(X(pt[0]), Y(pt[1])))
-                p.setPen(QPen(col, 2))
+                p.setPen(QPen(col, 2, Qt.DashLine if s.get("dashed") else Qt.SolidLine))
                 p.setBrush(Qt.NoBrush)
                 p.drawPath(path)
             for pt in ordered:
@@ -193,7 +204,9 @@ class TimelineChart(_Base):
             self.update()
         if hit:
             _, s, pt = hit
-            QToolTip.showText(e.globalPosition().toPoint(), f"<b>{pt[4]}</b><br>{s['name']}<br>{pt[2]}  ·  due {pt[5]:%d %b %Y}", self)
+            when = pt[5] if len(pt) > 5 else ""
+            when = f"  ·  due {when:%d %b %Y}" if isinstance(when, datetime) else (f"  ·  {when}" if when else "")
+            QToolTip.showText(e.globalPosition().toPoint(), f"<b>{pt[4]}</b><br>{s['name']}<br>{pt[2]}{when}", self)
             self.setCursor(Qt.PointingHandCursor)
         else:
             QToolTip.hideText()
@@ -211,7 +224,7 @@ class TimelineChart(_Base):
                 self.update()
                 return
         hit = self._nearest(e.position())
-        if hit:
+        if hit and hit[2][3] is not None:
             self.point_clicked.emit(hit[2][3])
 
 
