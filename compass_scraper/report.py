@@ -9,6 +9,8 @@ import html
 import json
 from pathlib import Path
 
+from . import insights
+
 _CSS = """
 :root{--bg:#f6f6f7;--card:#fff;--ink:#18181b;--muted:#71717a;--line:#e4e4e7;--accent:#2563eb;--accent-soft:#eff6ff;--hit:#dcfce7;--hit-ink:#14532d;--chip:#f4f4f5}
 @media (prefers-color-scheme:dark){:root{--bg:#1e1e20;--card:#26262a;--ink:#e4e4e7;--muted:#a1a1aa;--line:#3a3a40;--accent:#60a5fa;--accent-soft:#1e293b;--hit:#1f3b2b;--hit-ink:#bbf7d0;--chip:#2c2c31}}
@@ -127,7 +129,7 @@ def write_dashboard(path: Path, tasks: list[dict], student: dict) -> None:
 <select id="status" aria-label="Status"><option value="">Any status</option><option>To do</option><option>Overdue</option><option>Due soon</option><option>Completed</option><option>Submitted</option><option>Graded</option></select>
 <select id="has" aria-label="Has"><option value="">Anything</option><option value="rubric">Has rubric</option><option value="comment">Has feedback comment</option><option value="submission">Has submission</option><option value="files">Has files</option></select></div>
 <div id="list"></div></main>
-<script type="application/json" id="data">{_json_for_script({"student": student, "tasks": tasks})}</script>
+<script type="application/json" id="data">{_json_for_script({"student": student, "tasks": [{**t, "primaryGrade": insights.headline(t)} for t in tasks]})}</script>
 <script>{_JS}</script></body></html>"""
     path.write_text(doc, encoding="utf-8")
 

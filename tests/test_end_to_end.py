@@ -108,7 +108,8 @@ class FakeCompass(BaseHTTPRequestHandler):
         FakeCompass.calls.append(("GET", u.path, q))
         if u.path.endswith("GetAllAcademicGroups"):
             return self._send(200, {"d": [{"id": 13, "importIdentifier": "2024", "name": "2024 Academic", "isRelevant": False},
-                                          {"id": 14, "importIdentifier": "2025", "name": "2025 Academic", "isRelevant": True}]})
+                                          {"id": 14, "importIdentifier": "2025", "name": "2025 Academic", "isRelevant": True},
+                                          {"id": 15, "importIdentifier": "2023HS", "name": "2023 HeadStart", "isRelevant": False}]})
         if u.path.endswith("GetGradingSchemesForLearningTasks"):
             return self._send(200, {"d": [{"name": "Performance", "options": [{"id": OPT_ABOVE, "displayValue": "Above the expected level", "colour": "#0a0"}]}]})
         if u.path.endswith("FileAssets.svc/DownloadFile"):
@@ -268,15 +269,22 @@ def test_insights():
     assert I.score({"display": "82", "item": "Exam %"}).kind == "percent" and I.score({"display": "9.5", "item": "VCS: Science"}).kind == "number"
     t2 = {"grades": [{"item": "Performance", "display": "Towards the expected level"}, {"item": "Exam %", "display": "62"},
                      {"item": "VCE", "display": "8.5", "isPrimary": True}]}
-    # a percentage makes it a SAC (or an Exam by name), never also a VCE number score
-    assert I.mark_category(t2) == I.SAC and I.task_score(t2, I.SAC).value == 62 and I.task_score(t2, I.VC) is None
-    assert I.mark_category({**t2, "name": "Semester 1 Exam"}) == I.EXAM and I.task_score({**t2, "name": "Exam 2"}, I.SAC) is None
+    # Year 10 and below: a number score with a percentage is a CAT, with the number score first
+    assert I.mark_category(t2) == I.CAT and I.task_score(t2, I.CAT).value == 8.5 and I.task_score(t2, I.CAT, "percent").value == 62
+    assert I.task_score(t2, I.SAC) is None and I.task_score(t2, I.VC) is None
+    # Year 11 and above: the same rows stay a SAC (or an Exam by name), never a CAT
+    t2y11 = {**t2, "subject": "11VCECOM 11 Applied Computing 1,2 Yr11"}
+    assert I.mark_category(t2y11) == I.SAC and I.task_score(t2y11, I.SAC).value == 62
+    assert I.mark_category({**t2y11, "name": "Semester 1 Exam"}) == I.EXAM and I.task_score({**t2y11, "name": "Exam 2"}, I.SAC) is None
+    # the word "exam" always means Exams, in any year, but "example" doesn't
+    assert I.mark_category({**t2, "name": "Semester 1 Exam"}) == I.EXAM and I.mark_category({**t2, "name": "Worked examples"}) == I.CAT
     t3 = {"name": "CAT 2", "grades": [{"item": "VCE", "display": "8.5", "isPrimary": True}, {"item": "Effort", "display": "Good"}]}
-    assert I.mark_category(t3) == I.VC and I.task_score(t3, I.VC).value == 8.5 and I.task_level(t2) == "Towards"
+    assert I.mark_category(t3) == I.CAT and I.task_score(t3, I.CAT).value == 8.5 and I.task_level(t2) == "Towards"
+    assert I.mark_category({**t3, "subject": "11VCECOM Yr11"}) == I.VC and I.task_score({**t3, "subject": "11VCECOM Yr11"}, I.VC).value == 8.5
     # a bare number too big to be a level score is a percentage (e.g. Applied Computing: 100)
     ac = {"name": "Unit 1 Outcome 2", "grades": [{"item": "VCE Applied Computing", "display": "100", "isPrimary": True}]}
     assert I.mark_category(ac) == I.SAC and I.task_score(ac, I.SAC).value == 100 and I.task_score(ac, I.VC) is None
-    assert I.mark_category({"name": "x", "grades": [{"item": "Result", "display": "12.5"}]}) == I.VC
+    assert I.mark_category({"name": "x", "grades": [{"item": "Result", "display": "12.5"}]}) == I.CAT
     assert I.counts_for_performance({"category": "Assessment"}) and I.counts_for_performance({"category": "Assignment"})
     assert not I.counts_for_performance({"category": "Homework"}) and not I.counts_for_performance({})
 
@@ -303,3 +311,180 @@ def test_planner_and_ics(tmp_path):
     entries = I.timeline([{"id": 7, "name": "Essay, part 1", "subject": "English", "dueDate": "2030-05-02T00:00:00Z", "grades": [], "rubrics": []}], p)
     ics = I.to_ics(entries)
     assert "SUMMARY:Due: Essay\\, part 1" in ics and "DTSTART:20300502T000000Z" in ics and ics.count("BEGIN:VEVENT") == 2
+
+
+def _maths_cat():
+    """Year 10 task with a level, a percentage under "Performance" and a curriculum score."""
+    return {"name": "Semester 2 Mathematics CAT 3 - Polynomials & Functions", "subject": "10MATEA 10 Maths: Extension and Analysis Yr10",
+            "category": "Assessment", "primaryGrade": "Above the expected level", "grades": [
+                {"item": "Performance", "display": "65"}, {"item": "Algebra (VCM2MA)", "display": "10.5", "scheme": "Victorian Curriculum"},
+                {"item": "Performance", "display": "Above the expected level", "isPrimary": True}, {"item": "Effort", "display": "Very Good", "scheme": "Work Habits"}]}
+
+
+def _vce_sac(band="High - Excellent", percent="97"):
+    return {"name": "Unit 2 SAC 1: Innovative Solution", "subject": "11VCECOM 11 Applied Computing 1,2 Yr11", "category": "Assessment", "grades": [
+        {"item": "VCE SAC Results", "display": band, "scheme": "VCE SAC Results", "isPrimary": True},
+        {"item": "Performance %", "display": percent, "scheme": "Performance"}, {"item": "Effort", "display": "Excellent", "scheme": "Work Habits"}]}
+
+
+def test_year_level():
+    from compass_scraper import insights as I
+    assert I.year_level({"subject": "10MATEA 10 Maths Yr10"}) == 10 and I.year_level({"subject": "9SCI Science"}) == 9
+    assert I.year_level({"subject": "Maths", "className": "7ENGE"}) == 7 and I.year_level({"subject": "11ABC Maths Yr10"}) == 11
+    assert I.year_level({"subject": "Maths", "className": "Year 12 Maths"}) == 12 and I.year_level({"subject": "2026 Maths"}) is None
+    assert I.is_senior(_vce_sac()) and I.is_senior({"subject": "Art", "grades": [{"item": "Result", "display": "80"}]})
+    # no year in the class code: a VCE number score means Year 10 or below
+    assert not I.is_senior({"subject": "Art", "grades": [{"item": "VCS: Science", "display": "9.5"}]})
+
+
+def test_cats_are_year_10_and_below():
+    from compass_scraper import insights as I
+    cat = _maths_cat()
+    assert I.mark_category(cat) == I.CAT and I.score_types([cat]) == [I.CAT] and I.has_score_type(cat, I.CAT)
+    assert I.task_score(cat, I.CAT).label == "10.5" and I.task_score(cat, I.CAT, "percent").value == 65
+    # the row's title marks a curriculum score, even when "exam" or "percent" is in it
+    assert I.score({"item": "VCS: Science Exam", "display": "9.5"}).kind == "number"
+    assert I.score({"item": "Performance", "display": "9"}).kind == "percent"
+    # every other marked assessment in Year 10 and below is a CAT too, except exams
+    assert I.mark_category({**cat, "grades": cat["grades"][1:]}) == I.CAT
+    pct_only = {**cat, "name": "Topic test", "grades": cat["grades"][:1]}
+    assert I.mark_category(pct_only) == I.CAT and I.task_score(pct_only, I.CAT) is None and I.task_score(pct_only, I.CAT, "percent").value == 65
+    assert I.mark_category({**pct_only, "name": "Semester exam"}) == I.EXAM
+    assert I.mark_category({**cat, "grades": cat["grades"][2:]}) is None   # a level with no mark to graph
+    # the same task in a Year 11 subject is never a CAT
+    assert I.mark_category({**cat, "subject": "11MATH Yr11"}) == I.SAC
+
+
+def test_headline_prefers_number_in_year_10():
+    from compass_scraper import insights as I
+    cat = _maths_cat()
+    assert I.headline(cat) == "Above the expected level"   # a grade stays the headline
+    pct = {**cat, "primaryGrade": "65"}
+    assert I.headline(pct) == "10.5" and I.headline({**pct, "subject": "11MATH Yr11"}) == "65"
+    assert I.headline({"grades": []}) is None
+
+
+def test_sac_performance_bands():
+    from compass_scraper import insights as I
+    sac = _vce_sac()
+    assert I.mark_category(sac) == I.SAC and I.task_score(sac, I.SAC).value == 97
+    top, mid = I.task_score(sac, I.SAC, "performance"), I.task_score(_vce_sac("Medium – High"), I.SAC, "performance")
+    assert top.kind == "performance" and top.label == "High - Excellent" and mid.label == "Medium - High" and top.value > mid.value
+    # Effort is never a performance result, and a band alone still makes a SAC
+    effort = {**sac, "grades": sac["grades"][2:]}
+    assert I.task_score(effort, I.SAC, "performance") is None and I.mark_category(effort) is None
+    assert I.mark_category({**sac, "grades": sac["grades"][:1]}) == I.SAC
+    assert I.performance_band({"item": "VCE SAC Results", "display": "Ungraded"}) is None
+    assert I.performance_scale(["High"]) == list(I.SAC_BANDS)
+    assert I.performance_scale(x for x in ["Very High"]).index("Very High") == 5
+
+
+def _snapshot(folder):
+    return {p.relative_to(folder).as_posix(): p.read_bytes() for p in folder.rglob("*") if p.is_file()}
+
+
+def test_headstart_years_are_left_out(server, tmp_path):
+    from compass_scraper import insights
+    assert insights.is_academic_year("2025 Academic") and not insights.is_academic_year("2023 HeadStart")
+    assert not insights.is_academic_year("2023 Head Start")
+    client = client_for(server)
+    assert [g["name"] for g in client.academic_groups()] == ["2024 Academic", "2025 Academic"]
+    with pytest.raises(Exception, match="Available: 2024, 2025"):
+        scrape.run(client, tmp_path / "o", years=["2023HS"])
+
+    # tasks already synced for those years go at the next sync
+    out = tmp_path / "p"
+    scrape.run(client, out, download=False, zip_output=False)
+    data = json.loads((out / "data.json").read_text(encoding="utf-8"))
+    old = {**data["tasks"][0], "id": 1, "year": "2023 HeadStart", "academicGroupId": 15}
+    kept = {**data["tasks"][0], "id": 2, "year": "2020 Academic", "academicGroupId": 9}
+    (out / "data.json").write_text(json.dumps({**data, "tasks": data["tasks"] + [old, kept]}), encoding="utf-8")
+    scrape.run(client, out, download=False, zip_output=False)
+    ids = [t["id"] for t in json.loads((out / "data.json").read_text(encoding="utf-8"))["tasks"]]
+    assert 1 not in ids and 2 in ids
+
+
+def test_interrupted_download_changes_nothing(server, tmp_path, monkeypatch):
+    out = tmp_path / "p"
+    scrape.run(client_for(server), out, zip_output=False)
+    before = _snapshot(out)
+    assert not (out / scrape.STAGE_DIR).exists()
+
+    # a new task appears, then the app dies part-way through its download
+    monkeypatch.setattr(__import__(__name__), "TASKS", [make_task(9, "9MA Maths", attachments=[
+        {"id": 1, "name": "New.pdf", "fileName": "New.pdf"}, {"id": 2, "name": "Other.pdf", "fileName": "Other.pdf"}])] + TASKS)
+    real, calls = CompassClient.download, []
+
+    def dies(self, url, dest, chunk=1 << 16):
+        calls.append(dest.name)
+        if len(calls) > 1:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.with_name(dest.name + ".part").write_bytes(b"half a fi")
+            raise KeyboardInterrupt
+        return real(self, url, dest, chunk)
+    monkeypatch.setattr(CompassClient, "download", dies)
+    with pytest.raises(KeyboardInterrupt):
+        scrape.run(client_for(server), out, workers=1, zip_output=False)
+    now = _snapshot(out)
+    assert {k: v for k, v in now.items() if not k.startswith(scrape.STAGE_DIR)} == before
+    assert any(k.endswith(".part") for k in now)
+
+    # the next sync keeps the finished download, clears the partial one and completes
+    monkeypatch.setattr(CompassClient, "download", real)
+    res = scrape.run(client_for(server), out, workers=1, zip_output=False)
+    after = _snapshot(out)
+    assert res.files_ok == 1 and res.files_skipped == 5
+    assert not (out / scrape.STAGE_DIR).exists() and not any(k.endswith(".part") for k in after)
+    assert sum(k.endswith(("New.pdf", "Other.pdf")) for k in after) == 2
+
+
+def test_interrupted_writing_changes_nothing(server, tmp_path, monkeypatch):
+    out = tmp_path / "p"
+    scrape.run(client_for(server), out, download=False, zip_output=False)
+    before = _snapshot(out)
+
+    def dies(*a, **k):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(scrape, "write_dashboard", dies)
+    with pytest.raises(KeyboardInterrupt):
+        scrape.run(client_for(server), out, download=False, zip_output=False)
+    assert {k: v for k, v in _snapshot(out).items() if not k.startswith(scrape.STAGE_DIR)} == before
+
+
+def test_interrupted_final_move_is_finished_next_time(server, tmp_path, monkeypatch):
+    out = tmp_path / "p"
+    scrape.run(client_for(server), out, download=False, zip_output=False)
+    monkeypatch.setattr(__import__(__name__), "TASKS", TASKS + [make_task(9, "9MA Maths")])
+    real, moved = scrape.os.replace, []
+
+    def dies(a, b):
+        if len(moved) == 2:
+            raise KeyboardInterrupt
+        moved.append(b)
+        real(a, b)
+    monkeypatch.setattr(scrape.os, "replace", dies)
+    with pytest.raises(KeyboardInterrupt):
+        scrape.run(client_for(server), out, download=False, zip_output=False)
+    monkeypatch.setattr(scrape.os, "replace", real)
+    # data.json moves last, so the portfolio still reads as the old sync
+    assert all(t["id"] != 29709 for t in json.loads((out / "data.json").read_text(encoding="utf-8"))["tasks"])
+    scrape.recover(out)
+    assert not (out / scrape.STAGE_DIR).exists()
+    assert any(t["name"] == make_task(9, "9MA Maths")["name"] for t in json.loads((out / "data.json").read_text(encoding="utf-8"))["tasks"])
+    assert (out / "index.html").exists()
+
+
+def test_failed_zip_keeps_the_old_one(tmp_path, monkeypatch):
+    out = tmp_path / "p"
+    out.mkdir()
+    (out / "a.txt").write_text("a")
+    z = scrape.make_zip(out)
+    before = z.read_bytes()
+    (out / "b.txt").write_text("b")
+
+    def dies(self, *a, **k):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(zipfile.ZipFile, "write", dies)
+    with pytest.raises(KeyboardInterrupt):
+        scrape.make_zip(out)
+    assert z.read_bytes() == before

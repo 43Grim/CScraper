@@ -13,7 +13,7 @@ from rich.progress import BarColumn, MofNCompleteColumn, Progress as RichProgres
 from . import __version__
 from .auth import BROWSERS, forget_session, get_session, save_session, session_from_cookie_header
 from .client import CompassClient, CompassError, SessionExpired
-from .scrape import Cancelled, Progress, run
+from .scrape import Progress, run
 
 DEFAULT_HOST = "auburnhs-vic.compass.education"
 
@@ -36,7 +36,7 @@ def parse_args(argv=None):
     p.add_argument("--relogin", action="store_true", help="ignore the saved session and read a fresh one from the browser")
     p.add_argument("--logout", action="store_true", help="delete the saved session and exit")
     p.add_argument("--list-years", action="store_true", help="show the academic years Compass has and exit")
-    p.add_argument("--install-desktop", action="store_true", help="add the desktop app to your application menu (Linux) and exit")
+    p.add_argument("--install-desktop", action="store_true", help="add the desktop app to your app menu, Start menu or Applications folder and exit")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return p.parse_args(argv)
 

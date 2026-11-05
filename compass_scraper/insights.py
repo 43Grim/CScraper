@@ -14,6 +14,14 @@ from pathlib import Path
 DUE_SOON_DAYS = 7
 
 
+_HEADSTART = re.compile(r"head\s*start", re.I)
+
+
+def is_academic_year(name: str | None) -> bool:
+    """False for HeadStart years, which the app leaves out entirely."""
+    return not _HEADSTART.search(name or "")
+
+
 def parse_dt(s: str | None) -> datetime | None:
     if not s:
         return None
@@ -51,6 +59,11 @@ STATUS_FILTERS = {
 }
 
 
+def has_grades(t: dict) -> bool:
+    """Any row on the task's Grades table has a value (a comment alone counts)."""
+    return any(g.get("display") for g in t.get("grades", []))
+
+
 def has_results(t: dict) -> bool:
     return any(g.get("display") and not g.get("isComment") for g in t.get("grades", [])) or \
         any(c.get("awarded") for r in t.get("rubrics", []) for c in r.get("criteria", []))
@@ -62,7 +75,7 @@ def is_submitted(t: dict) -> bool:
 
 def status(t: dict, done_ids: set | None = None, at: datetime | None = None) -> str:
     """graded > submitted > done (marked by you) > overdue / due_soon / pending / no_date."""
-    if has_results(t) or any(g.get("display") for g in t.get("grades", [])):  # a comment alone counts as marked
+    if has_results(t) or has_grades(t):  # a comment alone counts as marked
         return "graded"
     if is_submitted(t):
         return "submitted"
@@ -100,12 +113,15 @@ _FRAC = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(?:/|out of)\s*(\d+(?:\.\d+)?)\s*$", 
 
 
 VC_MAX = 13.0   # Victorian Curriculum / VCE level scores sit roughly between 0 and 12.5
-_PCT_NAME = re.compile(r"%|percent|\bsac\b|\bexam", re.I)
+_PCT_NAME = re.compile(r"%|percent|\bsac\b|\bexam|\bperformance\b", re.I)
+_VC_ROW = re.compile(r"\bVC(?!E\b)[A-Z0-9]+\b")   # curriculum codes such as VCS, VCM2MA or VCERV, but not plain "VCE"
 
 
 def _looks_like_percent(g: dict, v: float) -> bool:
     """A bare number is a percentage when the row says so, or when it's too big to be a level score (e.g. 100, 82)."""
     name = g.get("item") or ""
+    if v <= VC_MAX and (g.get("scheme") == "Victorian Curriculum" or _VC_ROW.search(name)):
+        return False   # the row's title says it's a curriculum number score
     if _PCT_NAME.search(name):
         return True
     return v > VC_MAX and v <= 100
@@ -143,11 +159,25 @@ def score(g: dict) -> Score | None:
 
 
 VC = "VCE Number Scores"
+CAT = "CATs"
 SAC = "SACs"
 EXAM = "Exams"
-SCORE_KINDS = {VC: ("number",), SAC: ("percent",), EXAM: ("percent",)}
-PERCENT_CATEGORIES = (SAC, EXAM)
-_EXAM = re.compile(r"\bexam", re.I)
+# Each category's marks, the default first.
+SCORE_KINDS = {VC: ("number",), CAT: ("number", "percent"), SAC: ("percent", "performance"), EXAM: ("percent",)}
+SCORE_VIEWS = {CAT: (("number", "VCE Number Scores"), ("percent", "Percentages")),
+               SAC: (("percent", "Percentage"), ("performance", "Performance"))}
+_EXAM = re.compile(r"\bexam(?:s|inations?)?\b", re.I)
+_YEAR_WORD = re.compile(r"\b(?:Yr|Year)\s*(\d{1,2})\b", re.I)
+_YEAR_PREFIX = re.compile(r"^\s*(\d{1,2})(?=[A-Za-z\s])")   # subject codes such as "10MATEA" or "11 Applied Computing"
+FIRST_SENIOR_YEAR = 11
+
+# VCE SAC performance results, lowest to highest. These are ranks, not percentages.
+SAC_BANDS = ("Very Low", "Low", "Medium", "Medium - High", "High", "High - Excellent")
+PERFORMANCE_BANDS = ("Very Low", "Low", "Medium", "Medium - High", "High", "Very High", "High - Excellent", "Excellent")
+_BAND_RANK = {b.lower(): i for i, b in enumerate(PERFORMANCE_BANDS)}
+_NOT_PERFORMANCE = re.compile(r"effort|work habit|behaviou?r|progress", re.I)
+_DASH = re.compile(r"\s*[-–—]\s*")
+_LEVEL_LABEL = re.compile(r"level|standard|expected", re.I)
 
 
 def _first(t: dict, kind: str) -> Score | None:
@@ -158,37 +188,93 @@ def _first(t: dict, kind: str) -> Score | None:
     return None
 
 
-def mark_category(t: dict) -> str | None:
-    """Puts each task in exactly one marks category.
-
-    A percentage result makes it an Exam (when "exam" is in the name) or else a SAC.
-    Otherwise a plain number result (e.g. 9.5) makes it a VCE Number Score.
-    """
-    if _first(t, "percent"):
-        return EXAM if _EXAM.search(t.get("name") or "") else SAC
-    if _first(t, "number"):
-        return VC
+def year_level(t: dict) -> int | None:
+    """The task's year level: the digits starting its class code (e.g. "10MATEA" is 10), or else "Yr10". None when neither says."""
+    texts = (t.get("className") or "", t.get("subject") or "")
+    for pattern in (_YEAR_PREFIX.match, _YEAR_WORD.search):
+        for text in texts:
+            m = pattern(text)
+            if m:
+                return int(m.group(1))
     return None
 
 
+def performance_band(g: dict) -> Score | None:
+    """A SAC performance result (e.g. "High - Excellent") as a rank, or None for any other row."""
+    if g.get("isComment") or _NOT_PERFORMANCE.search(f"{g.get('item') or ''} {g.get('scheme') or ''}"):
+        return None
+    rank = _BAND_RANK.get(_DASH.sub(" - ", str(g.get("display") or "").strip()).lower())
+    return None if rank is None else Score(rank, "performance", PERFORMANCE_BANDS[rank])
+
+
+def _first_band(t: dict) -> Score | None:
+    for g in sorted(t.get("grades", []), key=lambda g: not g.get("isPrimary")):
+        s = performance_band(g)
+        if s:
+            return s
+    return None
+
+
+def performance_scale(labels) -> list[str]:
+    """The bands to draw on a graph: the standard VCE ones plus any others in use, lowest first."""
+    used = set(labels)
+    return [b for b in PERFORMANCE_BANDS if b in SAC_BANDS or b in used]
+
+
+def is_senior(t: dict) -> bool:
+    """Year 11 and above. The class code decides, so a Year 10 student's VCE subject counts as senior.
+
+    Without a year level, a VCE number score means Year 10 or below.
+    """
+    level = year_level(t)
+    return level >= FIRST_SENIOR_YEAR if level is not None else _first(t, "number") is None
+
+
+def mark_category(t: dict) -> str | None:
+    """Puts each task in exactly one marks category.
+
+    Any year: a marked task with the word "exam" in its name is an Exam.
+    Year 10 and below: a number score or a percentage makes it a CAT.
+    Year 11 and above: a percentage makes it a SAC, a number makes it a VCE Number Score,
+    and a SAC performance result on its own makes it a SAC.
+    """
+    percent, number = _first(t, "percent"), _first(t, "number")
+    senior = is_senior(t)
+    if not (percent or number or (senior and _first_band(t))):
+        return None
+    if _EXAM.search(t.get("name") or ""):
+        return EXAM
+    if not senior:
+        return CAT
+    return SAC if percent or not number else VC
+
+
 def score_types(tasks: list[dict]) -> list[str]:
-    """The marks categories present: VCE Number Scores, SACs and Exams."""
+    """The marks categories present: VCE Number Scores, CATs, SACs and Exams."""
     present = {mark_category(t) for t in tasks}
     return [k for k in SCORE_KINDS if k in present]
 
 
-def task_score(t: dict, score_type: str) -> Score | None:
-    """The task's mark in that category (None when the task belongs to another category)."""
-    if score_type in SCORE_KINDS:
-        if mark_category(t) != score_type:
-            return None
-        return _first(t, SCORE_KINDS[score_type][0])
-    for g in t.get("grades", []):
-        if g.get("item") == score_type:
-            s = score(g)
-            if s:
-                return s
-    return None
+def task_score(t: dict, score_type: str, view: str | None = None) -> Score | None:
+    """The task's mark in that category (None when the task belongs to another category).
+
+    `view` picks which of the category's marks: "number", "percent" or "performance".
+    """
+    if mark_category(t) != score_type:
+        return None
+    kind = view or SCORE_KINDS[score_type][0]
+    return _first_band(t) if kind == "performance" else _first(t, kind)
+
+
+def headline(t: dict) -> str | None:
+    """The task's main grade. In Year 10 and below, a number score goes ahead of a percentage."""
+    primary = t.get("primaryGrade")
+    if primary and not is_senior(t):
+        row = next((g for g in t.get("grades", []) if g.get("display") == primary), {"display": primary})
+        s, number = score(row), _first(t, "number")
+        if s and s.kind == "percent" and number:
+            return number.label
+    return primary
 
 
 PERFORMANCE_CATEGORIES = re.compile(r"assess|assign", re.I)
@@ -202,13 +288,15 @@ def counts_for_performance(t: dict) -> bool:
 LEVELS = [(100, "Well above"), (75, "Above"), (50, "At"), (25, "Towards"), (0, "Below")]
 
 
+def level_results(t: dict) -> list[Score]:
+    """The task's expected-level rows (e.g. Performance: "Above the expected level")."""
+    return [s for s in map(score, t.get("grades", [])) if s and s.kind == "scheme" and _LEVEL_LABEL.search(s.label)]
+
+
 def task_level(t: dict) -> str | None:
-    """The expected-level band from the task's label rows (e.g. Performance: "Above the expected level")."""
-    for g in t.get("grades", []):
-        s = score(g)
-        if s and s.kind == "scheme" and re.search(r"level|standard|expected", s.label, re.I):
-            return next(name for v, name in LEVELS if s.value >= v)
-    return None
+    """The task's expected-level band (Below, Towards, At, Above or Well above)."""
+    results = level_results(t)
+    return next(name for v, name in LEVELS if results[0].value >= v) if results else None
 
 
 def has_score_type(t: dict, score_type: str) -> bool:
@@ -216,7 +304,7 @@ def has_score_type(t: dict, score_type: str) -> bool:
         return bool(t.get("rubrics"))
     if score_type == "Has feedback comment":
         return any(g.get("isComment") and g.get("display") for g in t.get("grades", []))
-    return task_score(t, score_type) is not None
+    return mark_category(t) == score_type
 
 
 # ── planner: your own items, hidden tasks and "mark as done" ────────

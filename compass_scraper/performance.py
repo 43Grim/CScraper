@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import math
-import re
 from collections import Counter
+from dataclasses import replace
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QBrush, QColor
@@ -20,6 +20,11 @@ LEVEL_COLORS = {
     "Below": ("#fda4af", "#881337"), "Towards": ("#fca5a5", "#7f1d1d"), "At": ("#86efac", "#14532d"),
     "Above": ("#67e8f9", "#155e75"), "Well above": ("#d8b4fe", "#581c87"),
 }
+# SAC performance bands share those colours, grouped to match the key.
+KEY_LEVELS = ("Towards", "At", "Above", "Well above")
+BAND_KEY = {"Towards": "Low", "At": "Medium", "Above": "High", "Well above": "Excellent"}
+BAND_LEVEL = {"Very Low": "Towards", "Low": "Towards", "Medium": "At", "Medium - High": "At", "High": "Above",
+              "Very High": "Above", "High - Excellent": "Well above", "Excellent": "Well above"}
 TASK_ROLE = Qt.UserRole + 5
 
 
@@ -38,6 +43,17 @@ def _card(title: str, hint: str = "") -> tuple[QFrame, QVBoxLayout]:
         m.setWordWrap(True)
         v.addWidget(m)
     return card, v
+
+
+def _scrolling(chart: QWidget) -> QScrollArea:
+    """Lets a chart with many rows scroll instead of squeezing or cutting them off."""
+    scroll = QScrollArea()
+    scroll.setObjectName("plain")
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.NoFrame)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    scroll.setWidget(chart)
+    return scroll
 
 
 class PerformancePage(QWidget):
@@ -64,6 +80,10 @@ class PerformancePage(QWidget):
             w.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
             w.setMinimumContentsLength(6)
             top.addWidget(w, 1)
+        self.view = theme.Segmented()
+        self.view.setToolTip("Which marks to show for this category")
+        self._view_choice: dict[str, str] = {}
+        top.insertWidget(top.indexOf(self.kind) + 1, self.view)
         v.addLayout(top)
 
         stats = QHBoxLayout()
@@ -109,7 +129,7 @@ class PerformancePage(QWidget):
         k = QLabel("Key")
         k.setObjectName("muted")
         self.key.addWidget(k)
-        for name in ("Towards", "At", "Above", "Well above"):
+        for name in KEY_LEVELS:
             lab = QLabel(name)
             lab.setAlignment(Qt.AlignCenter)
             self.key_labels[name] = lab
@@ -122,18 +142,14 @@ class PerformancePage(QWidget):
         card, cv = _card("Average by subject")
         self.subjects = BarChart()
         self.subjects.fixed_row = 26
-        scroll = QScrollArea()
-        scroll.setObjectName("plain")
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setWidget(self.subjects)
-        cv.addWidget(scroll, 1)
+        cv.addWidget(_scrolling(self.subjects), 1)
         side.addWidget(card, 3)
-        card, cv = _card("Results breakdown", "All level results this year (assessments and assignments)")
+        card, cv = _card("Results breakdown", "How many results this year fell in each level (assessments and assignments)")
         self.dist = BarChart()
-        self.dist.setMinimumHeight(96)
-        cv.addWidget(self.dist, 1)
+        self.dist.fixed_row = 24
+        scroll = _scrolling(self.dist)
+        scroll.setMinimumHeight(96)
+        cv.addWidget(scroll, 1)
         side.addWidget(card, 2)
         grid.addLayout(side, 1, 1)
         grid.setColumnStretch(0, 3)
@@ -145,6 +161,7 @@ class PerformancePage(QWidget):
         self.year.currentIndexChanged.connect(self._year_changed)
         for w in (self.kind, self.axis, self.category):
             w.currentIndexChanged.connect(self.refresh)
+        self.view.changed.connect(self._view_changed)
 
     def set_colors(self, c: dict):
         self.c = c
@@ -173,10 +190,14 @@ class PerformancePage(QWidget):
         y = self.year.currentData()
         return [t for t in (self.browse.tasks if self.browse else []) if t.get("year") == y and insights.counts_for_performance(t)]
 
+    def _view_changed(self, view: str):
+        self._view_choice[self.kind.currentData()] = view
+        self.refresh()
+
     def _year_changed(self):
         tasks = self._year_tasks()
         for combo, values, first in ((self.kind, insights.score_types(tasks) or [insights.VC], None),
-                                     (self.category, sorted({t.get("category") or "" for t in tasks} - {""}), "Assessments & assignments")):
+                                     (self.category, sorted({t.get("category") or "" for t in tasks} - {""}), "All categories")):
             keep = combo.currentData()
             combo.blockSignals(True)
             combo.clear()
@@ -200,9 +221,16 @@ class PerformancePage(QWidget):
         if cat:
             tasks = [t for t in tasks if t.get("category") == cat]
         kind = self.kind.currentData() or insights.VC
-        pct = kind in insights.PERCENT_CATEGORIES
-        what = {insights.VC: "VCE number score", insights.SAC: "SAC", insights.EXAM: "exam"}[kind]
+        views = insights.SCORE_VIEWS.get(kind, ())
+        self.view.set_options(views, self._view_choice.get(kind))
+        self.view.setVisible(bool(views))
+        mark = self.view.current() if views else insights.SCORE_KINDS[kind][0]
+        pct, bands = mark == "percent", mark == "performance"
+        what = {insights.VC: "VCE number score", insights.CAT: "CAT number score" if mark == "number" else "CAT",
+                insights.SAC: "SAC performance" if bands else "SAC", insights.EXAM: "exam"}[kind]
         by_index = self.axis.currentData() == "index"
+        for name, lab in self.key_labels.items():
+            lab.setText(BAND_KEY[name] if bands else name)
 
         done = self.browse.planner.done if getattr(self.browse, "planner", None) else set()
         complete = sum(insights.is_complete(insights.status(t, done)) for t in tasks)
@@ -211,36 +239,49 @@ class PerformancePage(QWidget):
         # results breakdown: every level label this year, whatever the marks
         levels = Counter()
         for t in tasks:
-            for g in t.get("grades", []):
-                sc = insights.score(g)
-                if sc and sc.kind == "scheme" and re.search(r"level|standard|expected", sc.label, re.I):
-                    levels[(sc.value, sc.label)] += 1
+            if bands:
+                band = insights.task_score(t, kind, mark)
+                if band:
+                    levels[(band.value, band.label)] += 1
+            else:
+                levels.update((sc.value, sc.label) for sc in insights.level_results(t))
         if levels:
             top = max(levels.values())
             self.dist.set_data([(lab, n, str(n), self.c["accent"], f"{lab}: {n} result{'s' * (n != 1)}")
                                 for (val, lab), n in sorted(levels.items(), key=lambda x: -x[0][0])], 0, top)
         else:
-            self.dist.set_data([], message="No level results this year.")
+            self.dist.set_data([], message="No SAC performance results this year." if bands else "No level results this year.")
 
         scored = []
         for t in tasks:
-            s = insights.task_score(t, kind)
+            s = insights.task_score(t, kind, mark)
             due = insights.parse_dt(t.get("dueDate")) or insights.parse_dt(t.get("created"))
             if s and due:
                 scored.append((t, s, due))
         if not scored:
-            msg = f"No {what} marks for this year yet." if tasks else "No assessments or assignments for this year."
+            if not tasks:
+                msg = "No assessments or assignments for this year."
+            else:
+                msg = f"No {what} marks for this year yet." if insights.score_types(tasks) else "No marks for this year yet."
             self.trend.set_data([], 0, 100, [], msg)
             self.subjects.set_data([], message=msg)
             self.table.clear()
             self.table.setRowCount(0)
             self.table.setColumnCount(0)
             for k in ("Graded", "Average", "Strongest", "Trend"):
-                self._stat(k, "–")
+                self._stat(k, "–", k)
             return
 
+        scale: list[str] = []
+        if bands:   # ranks on an even scale: the graph shows names, never a made-up number
+            scale = insights.performance_scale(s.label for _, s, _ in scored)
+            scored = [(t, replace(s, value=scale.index(s.label)), due) for t, s, due in scored]
         values = [s.value for _, s, _ in scored]
-        if pct:
+        if bands:
+            lo, hi = -0.5, len(scale) - 0.5
+            ticks = list(enumerate(scale))
+            fmt = lambda v: scale[round(v)]
+        elif pct:
             lo, hi = 0.0, 100.0
             ticks = [(v, f"{v}%") for v in (0, 25, 50, 75, 100)]
             fmt = lambda v: f"{v:.0f}%"
@@ -271,12 +312,12 @@ class PerformancePage(QWidget):
             a = sum(vals) / len(vals)
             rows.append((subj, a, fmt(a), color_of[subj], f"{subj}: {len(vals)} mark{'s' * (len(vals) != 1)}, average {fmt(a)}"))
         rows.sort(key=lambda r: -r[1])
-        self.subjects.set_data(rows, lo, hi)
-        self._fill_table(by_subject, fmt, pct)
+        self.subjects.set_data(rows, -1 if bands else lo, hi)
+        self._fill_table(by_subject, fmt, bands)
 
         avg = sum(values) / len(values)
         self._stat("Graded", str(len(scored)), f"{kind} marked")
-        self._stat("Average", fmt(avg), f"Average {what}" if not pct else f"Average {what} %")
+        self._stat("Average", fmt(avg), f"Typical {what}" if bands else f"Average {what} %" if pct else f"Average {what}")
         best = rows[0]
         self._stat("Strongest", _short(best[0], 18), f"Strongest subject · {best[2]}")
         ordered = sorted(scored, key=lambda x: x[2])
@@ -287,11 +328,12 @@ class PerformancePage(QWidget):
             diff = last - first
             band = 0.05 * (hi - lo)
             arrow = "↑" if diff > band else "↓" if diff < -band else "→"
-            self._stat("Trend", f"{arrow} {abs(diff):.1f}{'%' if pct else ''}", f"Trend: average of latest {n} vs first {n}")
+            unit = " bands" if bands else "%" if pct else ""
+            self._stat("Trend", f"{arrow} {abs(diff):.1f}{unit}", f"Trend: average of latest {n} vs first {n}")
         else:
             self._stat("Trend", "–", "Trend (needs 4+ marks)")
 
-    def _fill_table(self, by_subject: dict, fmt, pct: bool):
+    def _fill_table(self, by_subject: dict, fmt, bands: bool):
         """One row per subject, one column per task in due-date order, then the average (like an achievement sheet)."""
         n = max(len(v) for v in by_subject.values())
         dark = QColor(self.c["window"]).lightness() < 128
@@ -309,8 +351,8 @@ class PerformancePage(QWidget):
                 cell = QTableWidgetItem(fmt(s.value))
                 cell.setTextAlignment(Qt.AlignCenter)
                 cell.setData(TASK_ROLE, t.get("id"))
-                level = insights.task_level(t)
-                cell.setToolTip(f"{t.get('name')}\nDue {due:%d %b %Y}" + (f"\n{level} level" if level else ""))
+                level = BAND_LEVEL[s.label] if bands else insights.task_level(t)
+                cell.setToolTip(f"{t.get('name')}\nDue {due:%d %b %Y}" + (f"\n{level} level" if level and not bands else ""))
                 if level:
                     cell.setBackground(QBrush(QColor(LEVEL_COLORS[level][dark])))
                     cell.setForeground(QBrush(QColor("#f4f4f5" if dark else "#18181b")))

@@ -9,14 +9,14 @@ from pathlib import Path
 from PySide6.QtCore import QProcess, QProcessEnvironment, QSettings, Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QFont, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QFrame, QGridLayout, QHBoxLayout,
+    QApplication, QCheckBox, QDialog, QFileDialog, QFormLayout, QFrame, QGridLayout, QHBoxLayout,
     QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPlainTextEdit,
     QProgressBar, QPushButton, QSpinBox, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from . import __version__, changes, desktop, theme
 from . import webauth
-from .auth import BROWSERS, diagnose, supported_browsers, forget_session, load_session, save_session, session_from_browser, session_from_cookie_header
+from .auth import diagnose, supported_browsers, forget_session, load_session, save_session, session_from_browser, session_from_cookie_header
 from .browse import BrowsePage
 from .overview import Overview
 from .performance import PerformancePage
@@ -47,7 +47,7 @@ class Job(QThread):
         try:
             self.done.emit(self.fn(self))
         except Cancelled:
-            self.failed.emit("cancelled", "Stopped. Files already downloaded are kept; sync again to resume.")
+            self.failed.emit("cancelled", "Stopped. Your portfolio hasn't changed. Files already downloaded are kept, so sync again to resume.")
         except SessionExpired as e:
             self.failed.emit("session", str(e))
         except Exception as e:  # surfaced in the log
@@ -211,7 +211,7 @@ class SignInDialog(QDialog):
                     self._sign_in_here(safe=True)
                 else:
                     noise = ("Fontconfig warning", "QVulkanInstance", "GBM is not supported")
-                    lines = [l for l in err.splitlines() if l.strip() and not l.startswith(noise)]
+                    lines = [ln for ln in err.splitlines() if ln.strip() and not ln.startswith(noise)]
                     tail = "\n".join(lines[-6:])
                     self._say("The sign-in window couldn't start on this computer. Use your browser's session or "
                               "“Paste cookie instead…”." + (f"\nDetails:\n{tail}" if tail else ""))
@@ -671,9 +671,9 @@ class MainWindow(QMainWindow):
         th.addWidget(self.theme, 1)
         v.addLayout(th)
         if desktop.supported():
-            self.menu_btn = QPushButton("Add to app menu")
+            self.menu_btn = QPushButton(f"Add to {desktop.place()}")
             self.menu_btn.setObjectName("link")
-            self.menu_btn.setToolTip("Adds Compass Scraper to your desktop's application launcher.")
+            self.menu_btn.setToolTip(f"Adds Compass Scraper to your {desktop.place()} so you can open it from there.")
             self.menu_btn.clicked.connect(self._install_desktop)
             v.addWidget(self.menu_btn, 0, Qt.AlignLeft)
         v.addWidget(_label(f"v{__version__}", "muted"))
@@ -689,12 +689,15 @@ class MainWindow(QMainWindow):
         self.performance.set_colors(self.colors)
 
     def _install_desktop(self):
+        QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             path = desktop.install()
         except OSError as e:
-            QMessageBox.warning(self, "Couldn't add launcher", str(e))
+            QMessageBox.warning(self, f"Couldn't add to {desktop.place()}", str(e))
             return
-        QMessageBox.information(self, "Added to app menu", f"Compass Scraper is now in your application menu.\n\n{path}")
+        finally:
+            QApplication.restoreOverrideCursor()
+        QMessageBox.information(self, f"Added to {desktop.place()}", f"Compass Scraper is now in your {desktop.place()}.\n\n{path}")
 
     def _set_session(self, s: Session | None, source: str = ""):
         self.session = s

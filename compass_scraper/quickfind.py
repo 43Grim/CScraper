@@ -56,7 +56,8 @@ class QuickFind(QDialog):
         self.list.clear()
         for t in found[:LIMIT]:
             st = insights.status_label(self.browse.status_of(t))
-            grade = f"  ·  {t['primaryGrade']}" if t.get("primaryGrade") else ""
+            headline = insights.headline(t)
+            grade = f"  ·  {headline}" if headline else ""
             it = QListWidgetItem(f"{t.get('name')}\n{t.get('subject')}  ·  {t.get('year')}  ·  due {fmt_date(t.get('dueDate')) or '–'}  ·  {st}{grade}")
             it.setData(ID_ROLE, t.get("id"))
             self.list.addItem(it)

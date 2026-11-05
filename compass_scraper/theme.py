@@ -5,9 +5,9 @@ import hashlib
 import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication, QComboBox, QStyledItemDelegate
+from PySide6.QtWidgets import QApplication, QButtonGroup, QComboBox, QHBoxLayout, QPushButton, QStyledItemDelegate, QWidget
 
 # Neutral greys with a blue accent, in the style of current desktop apps.
 LIGHT = {
@@ -73,6 +73,51 @@ class Combo(QComboBox):
         self.setMinimumContentsLength(10)
 
 
+class Segmented(QWidget):
+    """A row of joined buttons where exactly one is chosen, for switching between views."""
+    changed = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._layout = QHBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(0)
+        self._group = QButtonGroup(self)
+        self._options: tuple = ()
+        self._current = ""
+
+    def set_options(self, options, current: str | None = None):
+        """Options are (key, label) pairs. Doesn't emit `changed`."""
+        options = tuple(options)
+        if options != self._options:
+            self._options = options
+            for b in self._group.buttons():
+                self._group.removeButton(b)
+                self._layout.removeWidget(b)
+                b.deleteLater()
+            for i, (key, label) in enumerate(options):
+                b = QPushButton(label)
+                b.setObjectName("segment")
+                b.setCheckable(True)
+                b.setProperty("key", key)
+                b.setProperty("edge", "only" if len(options) == 1 else "first" if i == 0 else "last" if i == len(options) - 1 else "")
+                b.clicked.connect(lambda _=False, k=key: self._clicked(k))
+                self._group.addButton(b)
+                self._layout.addWidget(b)
+        keys = [k for k, _ in options]
+        self._current = current if current in keys else keys[0] if keys else ""
+        for b in self._group.buttons():
+            b.setChecked(b.property("key") == self._current)
+
+    def current(self) -> str:
+        return self._current
+
+    def _clicked(self, key: str):
+        if key != self._current:
+            self._current = key
+            self.changed.emit(key)
+
+
 def apply(app: QApplication, mode: str) -> dict:
     c = colors_for(mode, app)
     down, up, down_muted = _chevron(c["muted"]), _chevron(c["muted"], up=True), _chevron(c["line"])
@@ -105,6 +150,10 @@ def apply(app: QApplication, mode: str) -> dict:
         QPushButton#primary:hover {{ background: {c['accent_hover']}; border-color: {c['accent_hover']}; }}
         QPushButton#primary:disabled {{ background: {c['select']}; border-color: {c['line']}; color: {c['muted']}; }}
         QPushButton#danger:enabled {{ color: {c['bad']}; }}
+        QPushButton#segment {{ border-radius: 0; margin-left: -1px; min-height: 18px; }}
+        QPushButton#segment[edge="first"] {{ border-top-left-radius: 6px; border-bottom-left-radius: 6px; margin-left: 0; }}
+        QPushButton#segment[edge="last"] {{ border-top-right-radius: 6px; border-bottom-right-radius: 6px; }}
+        QPushButton#segment:checked {{ background: {c['accent']}; color: {c['accent_text']}; border-color: {c['accent']}; font-weight: 600; }}
         QPushButton#link {{ border: none; background: transparent; color: {c['accent']}; padding: 4px 4px; }}
         QPushButton#link:hover {{ text-decoration: underline; background: transparent; }}
         QListWidget#nav {{ background: transparent; border: none; font-size: 14px; outline: none; }}

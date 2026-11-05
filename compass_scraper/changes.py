@@ -58,8 +58,9 @@ def task_changes(old: dict | None, new: dict) -> list[dict]:
             else:
                 add(f"grade:{item}:{after[:40]}", kind, "New feedback" if kind == "feedback" else f"New result: {item}")
 
-    if any(a and a != _awarded(old).get(k) for k, a in _awarded(new).items()):
-        add("rubric:" + json.dumps(_awarded(new), sort_keys=True)[:80], "rubric", "Rubric marked")
+    was, now = _awarded(old), _awarded(new)
+    if any(a and a != was.get(k) for k, a in now.items()):
+        add("rubric:" + json.dumps(now, sort_keys=True)[:80], "rubric", "Rubric marked")
 
     for key, label in FILE_KINDS.items():
         before = {f.get("id") for f in old.get(key) or []}
@@ -123,7 +124,9 @@ def load_seen(out: Path) -> set[str]:
 
 def save_seen(out: Path, seen: set[str]) -> None:
     try:
-        seen_path(out).write_text(json.dumps(sorted(seen)))
+        tmp = seen_path(out).with_suffix(".tmp")
+        tmp.write_text(json.dumps(sorted(seen)))
+        tmp.replace(seen_path(out))
     except OSError:
         pass
 

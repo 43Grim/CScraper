@@ -13,6 +13,8 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from .insights import is_academic_year
+
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/130.0 Safari/537.36"
@@ -104,7 +106,7 @@ class CompassClient:
 
     # ── data ─────────────────────────────────────────────────────────
     def academic_groups(self) -> list[dict]:
-        return list(self.get_reference("GetAllAcademicGroups") or [])
+        return [g for g in self.get_reference("GetAllAcademicGroups") or [] if is_academic_year(g.get("name"))]
 
     def grading_schemes(self) -> list[dict]:
         return list(self.get_reference("GetGradingSchemesForLearningTasks") or [])

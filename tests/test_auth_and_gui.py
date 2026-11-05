@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from compass_scraper import auth, insights
+from compass_scraper import auth, desktop, insights
 from compass_scraper.client import CompassClient, SessionExpired
 
 from test_end_to_end import USER, FakeCompass, server  # noqa: F401  (fixture)
@@ -60,6 +60,7 @@ def test_gui_full_run(monkeypatch, server, tmp_path):
     w = gui.MainWindow(settings)
     assert w.nav.currentRow() == w.SYNC  # nothing synced yet
     assert w.nav.count() == 5
+    assert w.menu_btn.text() == f"Add to {desktop.place()}"
     sess = auth.Session(host="127.0.0.1", user_id=USER, user_name="Test Student", cookies=COOKIE)
 
     def pump(until, timeout=20):
@@ -101,7 +102,7 @@ def test_gui_full_run(monkeypatch, server, tmp_path):
 
     # performance graphs
     w.nav.setCurrentRow(w.PERFORMANCE)
-    assert w.performance.kind.currentText() == "VCE Number Scores"
+    assert w.performance.kind.currentText() == "CATs" and w.performance.view.current() == "number"
     assert w.performance.stats["Graded"][0].text() == "1" and w.performance.trend.series[0]["name"] == "9DIG Digital Technologies"
     assert w.performance.stats["Average"][0].text() == "9.0"
     assert w.performance.table.item(0, 1).text() == "9.0" and w.performance.table.item(0, 1).toolTip().endswith("Above level")
@@ -139,15 +140,79 @@ def test_gui_full_run(monkeypatch, server, tmp_path):
     w2.close()
 
 
-def test_desktop_install(monkeypatch, tmp_path):
-    from compass_scraper import desktop
+def test_desktop_install_linux(monkeypatch, tmp_path):
+    monkeypatch.setattr(desktop.sys, "platform", "linux")
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    assert desktop.supported() and desktop.place() == "app menu"
     entry = desktop.install()
     text = entry.read_text()
     assert "Exec=" in text and "compass_scraper.gui" in text and "Icon=compass-scraper" in text
-    assert (tmp_path / "icons/hicolor/scalable/apps/compass-scraper.svg").exists()
-    desktop.uninstall()
-    assert not entry.exists()
+    assert (tmp_path / "icons/hicolor/scalable/apps/compass-scraper.svg").read_bytes() == desktop.icon_path().read_bytes()
+    # a packaged app starts itself, without Python's arguments
+    monkeypatch.setattr(desktop.sys, "frozen", True, raising=False)
+    text = desktop.install().read_text()
+    assert f'Exec="{desktop.sys.executable}"\n' in text and "compass_scraper.gui" not in text and "Path=" not in text
+
+
+def test_desktop_install_windows(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(desktop.sys, "platform", "win32")
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setattr(desktop.subprocess, "run", lambda cmd, **kw: calls.append((cmd, kw)))
+    monkeypatch.setattr(desktop.sys, "frozen", True, raising=False)
+    assert desktop.supported() and desktop.place() == "Start menu"
+    link = desktop.install()
+    assert link == tmp_path / "Microsoft/Windows/Start Menu/Programs/Compass Scraper.lnk" and link.parent.is_dir()
+    cmd, kw = calls[0]
+    assert cmd[0] == "powershell" and "CreateShortcut" in cmd[-1] and str(tmp_path) not in cmd[-1]
+    assert kw["env"]["CS_LINK"] == str(link) and kw["env"]["CS_TARGET"] == desktop.sys.executable and kw["env"]["CS_ARGS"] == ""
+
+    def fail(cmd, **kw):
+        raise desktop.subprocess.CalledProcessError(1, cmd, stderr="access denied")
+    monkeypatch.setattr(desktop.subprocess, "run", fail)
+    with pytest.raises(OSError, match="access denied"):
+        desktop.install()
+
+
+def test_desktop_install_macos(monkeypatch, tmp_path):
+    monkeypatch.setattr(desktop.sys, "platform", "darwin")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(desktop.Path, "home", lambda: tmp_path)
+    assert desktop.supported() and desktop.place() == "Applications"
+    real_access = desktop.os.access
+    monkeypatch.setattr(desktop.os, "access", lambda p, m: False if str(p) == "/Applications" else real_access(p, m))
+
+    # running from source: a small launcher
+    app = desktop.install()
+    assert app == tmp_path / "Applications/Compass Scraper.app"
+    script = app / "Contents/MacOS/Compass Scraper"
+    assert "compass_scraper.gui" in script.read_text() and desktop.os.access(script, desktop.os.X_OK)
+
+    # a packaged app is copied there, replacing the old copy
+    bundle = tmp_path / "Downloads/Compass Scraper.app"
+    (bundle / "Contents/MacOS").mkdir(parents=True)
+    (bundle / "Contents/MacOS/Compass Scraper").write_text("real app")
+    monkeypatch.setattr(desktop.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(desktop.sys, "executable", str(bundle / "Contents/MacOS/Compass Scraper"))
+
+    def ditto(cmd, **kw):
+        assert cmd[0] == "ditto"
+        desktop.shutil.copytree(cmd[1], cmd[2])
+    monkeypatch.setattr(desktop.subprocess, "run", ditto)
+    assert desktop.install() == app and script.read_text() == "real app"
+    assert not (tmp_path / "Applications/.Compass Scraper.app.tmp").exists()
+
+    # a failed copy leaves the existing app alone
+    def fail(cmd, **kw):
+        raise desktop.subprocess.CalledProcessError(1, cmd, stderr="disk full")
+    monkeypatch.setattr(desktop.subprocess, "run", fail)
+    with pytest.raises(OSError, match="disk full"):
+        desktop.install()
+    assert script.read_text() == "real app"
+
+    # already in Applications: nothing to do
+    monkeypatch.setattr(desktop.sys, "executable", str(script))
+    assert desktop.install() == app
 
 
 def test_macos_profiles_and_safari(monkeypatch, tmp_path):
@@ -174,3 +239,66 @@ def test_macos_profiles_and_safari(monkeypatch, tmp_path):
     monkeypatch.setattr(browser_cookie3, "safari", blocked)
     with pytest.raises(Exception, match="Full Disk Access"):
         auth.cookies_from_browser("example.compass.education", "Safari")
+
+
+def _perf_page(qapp_tasks):
+    from types import SimpleNamespace
+    from PySide6.QtWidgets import QApplication
+    from compass_scraper import theme
+    from compass_scraper.performance import PerformancePage
+    app = QApplication.instance() or QApplication([])
+    page = PerformancePage()
+    page.set_colors(theme.apply(app, "Dark"))
+    page.set_source(SimpleNamespace(tasks=qapp_tasks, seen=set(), planner=insights.Planner()))
+    return page
+
+
+def _toggle(page, label):
+    from PySide6.QtWidgets import QPushButton
+    next(b for b in page.view.findChildren(QPushButton) if b.text() == label).click()
+
+
+def test_performance_toggles():
+    from test_end_to_end import _maths_cat, _vce_sac
+    dated = lambda t, i: {**t, "id": i, "year": "2026 Academic", "dueDate": f"2026-0{i}-10T00:00:00Z"}
+    page = _perf_page([dated(_maths_cat(), 1), dated(_vce_sac("Medium - High", "70"), 2), dated(_vce_sac(), 3)])
+    combo = page.kind
+    assert [combo.itemText(i) for i in range(combo.count())] == ["CATs", "SACs"]
+
+    # Year 10 CATs: number scores first, then percentages
+    assert not page.view.isHidden() and page.view.current() == "number"
+    assert page.stats["Average"][0].text() == "10.5" and page.table.item(0, 1).text() == "10.5"
+    assert page.table.item(0, 1).toolTip().endswith("Above level")
+    _toggle(page, "Percentages")
+    assert page.stats["Average"][0].text() == "65%" and page.trend.ticks[-1][1] == "100%"
+
+    # Year 11 SACs: percentage, then named performance bands instead of numbers
+    combo.setCurrentIndex(1)
+    assert page.view.current() == "percent" and page.stats["Average"][0].text() == "84%"
+    _toggle(page, "Performance")
+    assert [lbl for _, lbl in page.trend.ticks][-1] == "High - Excellent" and page.trend.series[0]["points"][-1][2] == "High - Excellent"
+    assert page.table.item(0, 1).text() == "Medium - High" and page.table.item(0, 2).text() == "High - Excellent"
+    assert page.key_labels["Well above"].text() == "Excellent"
+    assert {r[0] for r in page.dist.rows} == {"Medium - High", "High - Excellent"}
+    assert page.subjects.rows[0][2] in insights.PERFORMANCE_BANDS
+    page.grab()
+
+    # each category remembers its view
+    combo.setCurrentIndex(0)
+    assert page.view.current() == "percent" and page.key_labels["Well above"].text() == "Well above"
+    combo.setCurrentIndex(1)
+    assert page.view.current() == "performance"
+
+    # a year with no marks shows plain labels, whatever was on screen before
+    page.browse.tasks = [{"id": 9, "name": "Unmarked", "year": "2026 Academic", "subject": "9SCI", "category": "Assessment", "grades": []}]
+    page.set_source(page.browse)
+    assert page.kind.currentText() == "VCE Number Scores" and page.view.isHidden()
+    assert {k: v[1].text() for k, v in page.stats.items() if k != "Completed"} == {k: k for k in ("Graded", "Average", "Strongest", "Trend")}
+    assert page.trend.message == "No marks for this year yet."
+
+
+def test_performance_toggle_hidden_for_other_categories():
+    from test_end_to_end import _vce_sac
+    exam = {**_vce_sac(), "id": 1, "year": "2026 Academic", "name": "Exam", "dueDate": "2026-06-10T00:00:00Z"}
+    page = _perf_page([exam])
+    assert page.kind.currentText() == "Exams" and page.view.isHidden() and page.stats["Average"][0].text() == "97%"

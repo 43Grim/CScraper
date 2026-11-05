@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QListWidget, QListWidgetItem, QPushButton,
+    QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QListWidget, QListWidgetItem, QPushButton,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -115,7 +115,6 @@ class Overview(QWidget):
         ev.addStretch(2)
         v.addWidget(self.empty, 1)
         self._content = [self.year, card, self.new_list.parent(), self.due_list.parent(), self.recent_list.parent()]
-        self._grid_widgets = grid
         self._stats_cards = [self.stats_row.itemAt(i).widget() for i in range(self.stats_row.count())]
         self._set_loaded(False)
 
@@ -184,12 +183,13 @@ class Overview(QWidget):
                    and e.due and now - timedelta(days=30) <= e.due <= now + timedelta(days=21)]
         overdue = sum(1 for e in entries if e.status == "overdue")
         for key, n in (("Tasks", len(tasks)), ("Completed", sum(insights.is_complete(x) for x in sts)), ("Overdue", overdue),
-                       ("With results", sum(1 for t in tasks if any(g.get("display") for g in t.get("grades", [])))), ("New", len(new_tasks))):
+                       ("With results", sum(map(insights.has_grades, tasks))), ("New", len(new_tasks))):
             self.stats[key].setText(str(n))
 
         self.new_list.clear()
-        for t in sorted(new_tasks, key=lambda t: max(c["at"] for c in changes.unseen(t, seen)), reverse=True):
-            texts = ", ".join(dict.fromkeys(c["text"] for c in changes.unseen(t, seen)))
+        unseen = {id(t): changes.unseen(t, seen) for t in new_tasks}
+        for t in sorted(new_tasks, key=lambda t: max(c["at"] for c in unseen[id(t)]), reverse=True):
+            texts = ", ".join(dict.fromkeys(c["text"] for c in unseen[id(t)]))
             self._add(self.new_list, f"{t.get('name')}\n{t.get('subject')} · {texts}", t)
         if not new_tasks:
             self._add(self.new_list, "Nothing new since you last looked.", None)
@@ -205,11 +205,11 @@ class Overview(QWidget):
         if not entries:
             self._add(self.due_list, "Nothing due in the next 3 weeks.", None)
 
-        graded = sorted((t for t in tasks if any(g.get("display") for g in t.get("grades", []))),
+        graded = sorted(filter(insights.has_grades, tasks),
                         key=lambda t: _latest_result_time(t) or t.get("dueDate") or "", reverse=True)[:25]
         self.recent_list.clear()
         for t in graded:
-            grade = t.get("primaryGrade") or next((g["display"] for g in t["grades"] if g.get("display") and not g.get("isComment")), "✓")
+            grade = insights.headline(t) or next((g["display"] for g in t["grades"] if g.get("display") and not g.get("isComment")), "✓")
             self._add(self.recent_list, f"{grade}  ·  {t.get('name')}\n{t.get('subject')}", t)
         if not graded:
             self._add(self.recent_list, "No results yet.", None)
@@ -220,9 +220,9 @@ class Overview(QWidget):
             by.setdefault(t.get("subject") or "Unknown", []).append(t)
         for subj in sorted(by):
             ts = by[subj]
-            with_res = [t for t in ts if any(g.get("display") for g in t.get("grades", []))]
+            with_res = [t for t in ts if insights.has_grades(t)]
             latest = max(with_res, key=lambda t: _latest_result_time(t) or t.get("dueDate") or "", default=None)
-            self.subjects.addTopLevelItem(QTreeWidgetItem([subj, str(len(ts)), str(len(with_res)), (latest or {}).get("primaryGrade") or ""]))
+            self.subjects.addTopLevelItem(QTreeWidgetItem([subj, str(len(ts)), str(len(with_res)), (insights.headline(latest) if latest else "") or ""]))
 
     @staticmethod
     def _add(lst: QListWidget, text: str, t: dict | None) -> QListWidgetItem:

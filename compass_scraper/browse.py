@@ -6,13 +6,13 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from . import changes, insights, theme
+from . import changes, insights, scrape, theme
 
 from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QBrush, QColor, QDesktopServices, QPageLayout, QPageSize
 from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton, QSplitter, QTextBrowser, QTreeWidget,
+    QApplication, QCheckBox, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton, QSplitter, QTextBrowser, QTreeWidget,
     QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -34,10 +34,6 @@ def fmt_date(s: str | None) -> str:
         return f"{d.day} {d:%b %Y}"
     except ValueError:
         return s
-
-
-def _has_results(t: dict) -> bool:
-    return any(g.get("display") for g in t.get("grades", []))
 
 
 def task_html(t: dict, root: Path, c: dict, new_items: list[dict] | None = None, st: str | None = None) -> str:
@@ -71,8 +67,9 @@ def task_html(t: dict, root: Path, c: dict, new_items: list[dict] | None = None,
         lis = "<br>".join("• " + e(n["text"]) for n in new_items)
         parts.append(f"<table width='100%' cellspacing='0' style='margin-top:10px'><tr><td style='border:1px solid {c['accent']};"
                      f"background:{c['alt']}'><b style='color:{c['accent']}'>New since you last looked</b><br>{lis}</td></tr></table>")
-    if t.get("primaryGrade"):
-        parts.append(f"<p class='grade'>{e(t['primaryGrade'])}</p>")
+    grade = insights.headline(t)
+    if grade:
+        parts.append(f"<p class='grade'>{e(grade)}</p>")
 
     grades = [g for g in t.get("grades", []) if g.get("display")]
     parts.append("<h3>Grades &amp; feedback</h3>")
@@ -264,13 +261,14 @@ class BrowsePage(QWidget):
                 self.select_task(keep.get("id"))
 
     def load(self, root: Path) -> bool:
+        scrape.recover(Path(root))
         data_file = Path(root) / "data.json"
         if not data_file.exists():
             return False
         data = json.loads(data_file.read_text(encoding="utf-8"))
         self.root = Path(root)
         self.data = data
-        self.tasks = data.get("tasks", [])
+        self.tasks = [t for t in data.get("tasks", []) if insights.is_academic_year(t.get("year"))]
         self.seen = changes.load_seen(self.root)
         self.planner = insights.Planner.load(self.root)
         m = datetime.fromtimestamp(data_file.stat().st_mtime)
@@ -316,12 +314,14 @@ class BrowsePage(QWidget):
         y, s = self.year.currentData(), self.subject.currentData()
         wanted = insights.STATUS_FILTERS.get(self.state.currentData())
         kind = self.score_type.currentData()
-        shown = [t for t in self.tasks
-                 if (not y or t.get("year") == y) and (not s or t.get("subject") == s)
-                 and (not wanted or self.status_of(t) in wanted)
-                 and (not kind or insights.has_score_type(t, kind))
-                 and (not self.only_new.isChecked() or changes.unseen(t, self.seen))
-                 and insights.matches(t, q, self.status_of(t), bool(changes.unseen(t, self.seen)))]
+        only_new = self.only_new.isChecked()
+        shown = []
+        for t in self.tasks:
+            if (y and t.get("year") != y) or (s and t.get("subject") != s) or (kind and not insights.has_score_type(t, kind)):
+                continue
+            st, new = self.status_of(t), bool(changes.unseen(t, self.seen))
+            if (not wanted or st in wanted) and (new or not only_new) and insights.matches(t, q, st, new):
+                shown.append(t)
         current = self.tree.currentItem().data(0, TASK_ROLE).get("id") if self.tree.currentItem() and self.tree.currentItem().data(0, TASK_ROLE) else None
         self.tree.clear()
         by_subject: dict[str, list[dict]] = {}
@@ -338,7 +338,7 @@ class BrowsePage(QWidget):
             for t in tasks:
                 st = self.status_of(t)
                 child = QTreeWidgetItem([t.get("name") or "", insights.status_label(st),
-                                         t.get("primaryGrade") or ("✓" if _has_results(t) else ""), fmt_date(t.get("dueDate"))])
+                                         insights.headline(t) or ("✓" if insights.has_grades(t) else ""), fmt_date(t.get("dueDate"))])
                 child.setToolTip(2, child.text(2))
                 col = STATUS_COLOR.get(st)
                 if col:
@@ -446,8 +446,7 @@ class BrowsePage(QWidget):
         t = self.current_task()
         if not t:
             return
-        from .scrape import safe_name
-        default = str(Path.home() / "Documents" / f"{safe_name(t.get('name'), 80)}.pdf")
+        default = str(Path.home() / "Documents" / f"{scrape.safe_name(t.get('name'), 80)}.pdf")
         path, _ = QFileDialog.getSaveFileName(self, "Save task as PDF", default, "PDF (*.pdf)")
         if not path:
             return

@@ -9,7 +9,7 @@
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![PySide6](https://img.shields.io/badge/GUI-PySide6-41cd52)
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
-![Version](https://img.shields.io/badge/version-0.5.4-informational)
+![Version](https://img.shields.io/badge/version-0.5.5-informational)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/overview-dark.png">
@@ -30,14 +30,16 @@ Compass shows learning tasks 20 at a time, forgets your filters on every refresh
 - **Overview.** See what's new, what's overdue or coming up, your latest results and a per-subject summary at a glance.
 - **Task status.** Every task is marked **Graded**, **Submitted**, **Done**, **Overdue**, **Due soon** or **Pending**. Tasks with a result or an uploaded file count as complete automatically, and you can mark the rest done yourself.
 - **Master timeline.** One list of every due date, grouped into Overdue, Today, This week, Next week and Later. Add your own items (study sessions, reminders), mark things done, remove tasks you don't care about, and export everything to Google, Apple or Outlook Calendar as an `.ics` file.
-- **Performance graphs.** For each academic year, the app graphs your Assessments and Assignments, each subject task by task (or by due date). Every marked task goes into exactly one category:
-  - **VCE Number Scores:** number marks such as 9.5 or 10.0
-  - **SACs:** percentage results
-  - **Exams:** percentage results on tasks with "exam" in the name
+- **Performance graphs.** For each academic year, the app graphs your Assessments and Assignments, each subject task by task (or by due date). Every task with a mark goes into exactly one category:
+  - **Exams (any year):** marked tasks with the word "exam" in the name
+  - **CATs (Year 10 and below):** every other marked assessment. Switch between **VCE Number Scores** and **Percentages**.
+  - **SACs (Year 11 and above):** percentages and performance results. Switch between **Percentage** and **Performance** (results such as High or High - Excellent, graphed as named bands).
+  - **VCE Number Scores (Year 11 and above):** number marks on any other task
 
-  Percentages and number scores are never mixed. The page also has a results table like an achievement sheet, with each mark coloured Towards, At, Above or Well above level. It shows your average per subject and a breakdown of every level result too.
+  The year level comes from the digits starting the class code (for example, `10MATEA`), so a VCE subject taken early follows the Year 11 rules. If the code doesn't say, a VCE number score means Year 10 or below. Percentages, number scores and performance results are never mixed. The page also has a results table like an achievement sheet, with each mark coloured Towards, At, Above or Well above level. It shows your average per subject and a breakdown of every level result too.
 - **Search and filters.** Results filter instantly as you type, by status, subject, year or score type. Use search filters like `status:overdue`, `has:rubric` or `subject:english`. **Ctrl+K** searches every task in every year from anywhere in the app. Copy a task's feedback, save it as a PDF, or open its folder.
-- **Incremental syncs.** Re-syncing only downloads what's missing, so you can stop a sync at any time and resume it later.
+- **Incremental, crash-safe syncs.** Re-syncing only downloads what's missing, so you can stop a sync at any time and resume it later. Your portfolio only changes once a sync has finished, so if the app closes part-way, it stays exactly as it was.
+- **Academic years only.** HeadStart years are left out of syncing and the app.
 - **Portable output.** The app builds a self-contained `index.html` dashboard, a printable page for each rubric, `data.json` and an optional ZIP of everything.
 - **Comfortable to use.** It has light and dark themes (or follows your system), keyboard shortcuts, an optional sync when the app opens, and a Linux app-menu launcher.
 - **Command line too.** The same engine is available as `compass-scraper` for scripting.
@@ -123,7 +125,7 @@ uv run compass-scraper --list-years
 | `--relogin` / `--logout` | Refresh or delete the saved session. |
 | `--diagnose` | Print a sign-in diagnostic report (no cookie values). |
 | `--host` | Another school's Compass address (the default is `auburnhs-vic.compass.education`). |
-| `--install-desktop` | Add the app to your Linux application menu. |
+| `--install-desktop` | Add the app to your Linux app menu, Windows Start menu or macOS Applications folder. |
 
 ## Building standalone apps
 
@@ -136,7 +138,7 @@ uv run --no-sync pyinstaller --noconfirm --windowed --name "Compass Scraper" \
   --collect-submodules compass_scraper --collect-data compass_scraper launch_gui.py
 ```
 
-The result is in `dist/`. To build Windows, macOS and Linux versions together, run the **Build and release** workflow from the Actions tab (the builds are attached to the run), or push a tag like `v0.5.4` to also publish them as a GitHub Release.
+The result is in `dist/`. To build Windows, macOS and Linux versions together, run the **Build and release** workflow from the Actions tab (the builds are attached to the run), or push a tag like `v0.5.5` to also publish them as a GitHub Release.
 
 Notes for each platform:
 

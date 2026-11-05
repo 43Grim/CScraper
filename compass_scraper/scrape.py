@@ -1,19 +1,30 @@
-"""Collects every learning task for the chosen years, then downloads the files."""
+"""Collects every learning task for the chosen years, then downloads the files.
+
+A sync never touches the portfolio until it has finished. Everything goes into a hidden
+staging folder first, then moves across in one quick step. If the app stops part-way, the
+portfolio is exactly as it was, and the next sync reuses whatever was already downloaded.
+A sync that stopped during the final move is finished off the next time the portfolio opens.
+"""
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import changes
+from . import changes, insights
 from .client import CompassClient, CompassError, SessionExpired
 from .model import Lookups, normalise_task
 from .report import render_rubric_page, write_dashboard
 
+STAGE_DIR = ".syncing"
+READY_MARK = ".ready"   # in the staging folder: everything is written, so the move can go ahead
+LAST_TO_MOVE = ("index.html", "data.json")   # the app reads data.json, so it switches over last
 _BAD = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
@@ -24,7 +35,7 @@ def safe_name(s: str | None, limit: int = 80) -> str:
 
 
 class Cancelled(Exception):
-    """The user pressed Stop. Files already downloaded are kept, so a re-run resumes."""
+    """The user pressed Stop. Files already downloaded are kept in the staging folder, so a re-run resumes."""
 
 
 @dataclass
@@ -138,7 +149,8 @@ def plan_files(client: CompassClient, out: Path, tasks: list[dict]) -> list[dict
                 name = _unique(safe_name(f.get("fileName") or f.get("name") or f"file-{f['id']}", 120), used)
                 dest = tdir / sub / name
                 f["path"] = dest.relative_to(out).as_posix()
-                jobs.append({"task": t["name"], "kind": key, "url": url_for(f), "dest": dest, "file": f})
+                jobs.append({"task": t["name"], "kind": key, "url": url_for(f), "dest": dest, "file": f,
+                             "staged": out / STAGE_DIR / f["path"]})
     return jobs
 
 
@@ -149,10 +161,10 @@ def download_all(client: CompassClient, jobs: list[dict], progress: Progress, wo
 
     def run(job):
         progress.check()
-        dest: Path = job["dest"]
-        if dest.exists() and dest.stat().st_size > 0:
+        dest, staged = job["dest"], job["staged"]
+        if any(p.exists() and p.stat().st_size > 0 for p in (dest, staged)):
             return job, "skipped", None
-        size = client.download(job["url"], dest)
+        size = client.download(job["url"], staged)
         job["file"]["size"] = size
         return job, "ok", None
 
@@ -178,7 +190,30 @@ def download_all(client: CompassClient, jobs: list[dict], progress: Progress, wo
     return ok, skipped, failed
 
 
+def recover(out: Path) -> None:
+    """Finishes a sync that stopped during its final move, and clears partial files from any other."""
+    stage = out / STAGE_DIR
+    try:
+        if (stage / READY_MARK).exists():
+            _commit(stage, out)
+        for p in [*out.rglob("*.part"), *out.glob(".*.tmp")]:
+            p.unlink(missing_ok=True)
+    except OSError:   # a locked file, say: the next sync tries again
+        pass
+
+
+def _commit(stage: Path, out: Path) -> None:
+    """Moves everything from the staging folder into the portfolio. Safe to run again if interrupted."""
+    files = [p for p in stage.rglob("*") if p.is_file() and p.name != READY_MARK and not p.name.endswith(".part")]
+    for p in sorted(files, key=lambda p: p.relative_to(stage).as_posix() in LAST_TO_MOVE):
+        dest = out / p.relative_to(stage)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(p, dest)
+    shutil.rmtree(stage)
+
+
 def write_outputs(out: Path, tasks: list[dict], meta: dict, student: dict, last_sync: dict | None = None) -> None:
+    """Writes the task files, data.json and the dashboard into `out` (the staging folder)."""
     for t in tasks:
         tdir = out / t["folder"]
         tdir.mkdir(parents=True, exist_ok=True)
@@ -189,18 +224,18 @@ def write_outputs(out: Path, tasks: list[dict], meta: dict, student: dict, last_
             rub["path"] = p.relative_to(out).as_posix()
         (tdir / "task.json").write_text(json.dumps(t, indent=1, ensure_ascii=False), encoding="utf-8")
     data = {"student": student, "tasks": tasks, **meta, "lastSync": last_sync or {}}
-    tmp = out / "data.json.part"
-    tmp.write_text(json.dumps(data, indent=1, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(out / "data.json")
+    (out / "data.json").write_text(json.dumps(data, indent=1, ensure_ascii=False), encoding="utf-8")
     write_dashboard(out / "index.html", tasks, student)
 
 
 def make_zip(out: Path) -> Path:
     zip_path = out.with_suffix(".zip")
-    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
+    tmp = zip_path.with_name(zip_path.name + ".part")
+    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as z:
         for p in sorted(out.rglob("*")):
-            if p.is_file() and not p.name.endswith(".part"):
+            if p.is_file() and not p.name.endswith(".part") and STAGE_DIR not in p.relative_to(out).parts:
                 z.write(p, p.relative_to(out.parent).as_posix())
+    tmp.replace(zip_path)
     return zip_path
 
 
@@ -208,6 +243,7 @@ def run(client: CompassClient, out: Path, years: list[str] | None = None, progre
         download: bool = True, zip_output: bool = True, include_hidden: bool = False, workers: int = 4) -> Result:
     progress = progress or Progress()
     out.mkdir(parents=True, exist_ok=True)
+    recover(out)
     previous = changes.load_previous(out)
     tasks, meta = collect(client, years, progress, include_hidden=include_hidden)
     progress.tasks_total(len(tasks))
@@ -225,10 +261,14 @@ def run(client: CompassClient, out: Path, years: list[str] | None = None, progre
     res.changes = changes.apply(previous, tasks)
     # Years not synced this time stay in the portfolio as they were.
     synced = set(meta["syncedYears"])
-    kept = [t for t in (previous or {}).get("tasks", []) if t.get("academicGroupId") not in synced]
+    kept = [t for t in (previous or {}).get("tasks", []) if t.get("academicGroupId") not in synced and insights.is_academic_year(t.get("year"))]
     all_tasks = tasks + kept
     student = {"name": client.session.user_name, "userId": client.session.user_id, "host": client.session.host}
-    write_outputs(out, all_tasks, meta, student, res.changes)
+    stage = out / STAGE_DIR
+    stage.mkdir(exist_ok=True)
+    write_outputs(stage, all_tasks, meta, student, res.changes)
+    (stage / READY_MARK).touch()
+    _commit(stage, out)
     progress.log(changes.describe(res.changes))
     if zip_output:
         progress.phase("Building ZIP")
