@@ -132,6 +132,7 @@ class Score:
     value: float          # 0–100 for percent/scheme/letter, raw for "number"
     kind: str             # "percent", "scheme", "letter" or "number"
     label: str
+    parts: tuple = ()     # when several number scores were averaged: (row name, score text) for each
 
 
 def score(g: dict) -> Score | None:
@@ -186,6 +187,24 @@ def _first(t: dict, kind: str) -> Score | None:
         if s and s.kind == kind:
             return s
     return None
+
+
+def number_score(t: dict) -> Score | None:
+    """The task's VCE number score, made fair when it has several.
+
+    Some tasks give a number score for each curriculum strand (e.g. Algebra 9.0, Measurement 8.5).
+    If the teacher's main (primary) result is a number, that's the overall mark and it's used as is.
+    Otherwise every number score counts equally: the task's mark is their average, and `parts` lists them.
+    """
+    rows = [(g, s) for g in t.get("grades", []) for s in [score(g)] if s and s.kind == "number"]
+    if not rows:
+        return None
+    primary = next((s for g, s in rows if g.get("isPrimary")), None)
+    if primary or len(rows) == 1:
+        return primary or rows[0][1]
+    avg = round(sum(s.value for _, s in rows) / len(rows), 2)
+    parts = tuple(((g.get("item") or "Score").strip(), s.label) for g, s in rows)
+    return Score(avg, "number", f"{avg:g} (average of {len(rows)})", parts)
 
 
 def year_level(t: dict) -> int | None:
@@ -263,7 +282,9 @@ def task_score(t: dict, score_type: str, view: str | None = None) -> Score | Non
     if mark_category(t) != score_type:
         return None
     kind = view or SCORE_KINDS[score_type][0]
-    return _first_band(t) if kind == "performance" else _first(t, kind)
+    if kind == "performance":
+        return _first_band(t)
+    return number_score(t) if kind == "number" else _first(t, kind)
 
 
 def headline(t: dict) -> str | None:
@@ -271,7 +292,7 @@ def headline(t: dict) -> str | None:
     primary = t.get("primaryGrade")
     if primary and not is_senior(t):
         row = next((g for g in t.get("grades", []) if g.get("display") == primary), {"display": primary})
-        s, number = score(row), _first(t, "number")
+        s, number = score(row), number_score(t)
         if s and s.kind == "percent" and number:
             return number.label
     return primary

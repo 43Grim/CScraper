@@ -488,3 +488,19 @@ def test_failed_zip_keeps_the_old_one(tmp_path, monkeypatch):
     with pytest.raises(KeyboardInterrupt):
         scrape.make_zip(out)
     assert z.read_bytes() == before
+
+
+def test_several_number_scores_are_averaged_fairly():
+    from compass_scraper import insights as I
+    rows = [{"item": "Algebra (VCM2MA)", "display": "9.0"}, {"item": "Measurement (VCM2MG)", "display": "8.5"},
+            {"item": "Result %", "display": "70%", "isPrimary": True}]
+    t = {"name": "Topic test", "subject": "10MA Mathematics", "className": "10MAA", "grades": rows}
+    s = I.task_score(t, I.CAT)
+    assert s.value == 8.75 and s.parts == (("Algebra (VCM2MA)", "9.0"), ("Measurement (VCM2MG)", "8.5"))
+    assert I.headline({**t, "primaryGrade": "70%"}) == "8.75 (average of 2)"
+    # the teacher's overall (primary) number score wins over the strand scores
+    overall = {**t, "grades": [{"item": "Overall", "display": "10.0", "isPrimary": True}] + rows[:2]}
+    assert I.task_score(overall, I.CAT).value == 10.0 and not I.task_score(overall, I.CAT).parts
+    # a single number score is unchanged
+    one = {**t, "grades": rows[:1]}
+    assert I.task_score(one, I.CAT).label == "9.0" and not I.task_score(one, I.CAT).parts

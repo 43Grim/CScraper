@@ -9,7 +9,7 @@
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![PySide6](https://img.shields.io/badge/GUI-PySide6-41cd52)
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
-![Version](https://img.shields.io/badge/version-0.5.6-informational)
+![Version](https://img.shields.io/badge/version-0.5.7-informational)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/overview-dark.png">
@@ -143,7 +143,7 @@ uv run --no-sync pyinstaller --noconfirm --windowed --name "Compass Scraper" \
   --collect-all pypdfium2 --collect-all pypdfium2_raw launch_gui.py
 ```
 
-The result is in `dist/`. To build Windows, macOS and Linux versions together, run the **Build and release** workflow from the Actions tab (the builds are attached to the run), or push a tag like `v0.5.6` to also publish them as a GitHub Release.
+The result is in `dist/`. To build Windows, macOS and Linux versions together, run the **Build and release** workflow from the Actions tab (the builds are attached to the run), or push a tag like `v0.5.7` to also publish them as a GitHub Release.
 
 Notes for each platform:
 

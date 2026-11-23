@@ -1,6 +1,7 @@
 """The Performance page: graphs of every assessment result for one academic year."""
 from __future__ import annotations
 
+import html
 import math
 from collections import Counter
 from dataclasses import replace
@@ -302,7 +303,8 @@ class PerformancePage(QWidget):
             if not mine:
                 continue
             by_subject[subj] = mine
-            pts = [((i + 1) if by_index else due, s.value, s.label, t.get("id"), t.get("name"), due) for i, (t, s, due) in enumerate(mine)]
+            pts = [((i + 1) if by_index else due, s.value, _point_label(s), t.get("id"), t.get("name"), due)
+                   for i, (t, s, due) in enumerate(mine)]
             series.append({"name": subj, "color": color_of[subj], "points": pts})
         self.trend.set_data(series, lo, hi, ticks, by_index=by_index)
 
@@ -352,7 +354,10 @@ class PerformancePage(QWidget):
                 cell.setTextAlignment(Qt.AlignCenter)
                 cell.setData(TASK_ROLE, t.get("id"))
                 level = BAND_LEVEL[s.label] if bands else insights.task_level(t)
-                cell.setToolTip(f"{t.get('name')}\nDue {due:%d %b %Y}" + (f"\n{level} level" if level and not bands else ""))
+                tip = f"{t.get('name')}\nDue {due:%d %b %Y}" + (f"\n{level} level" if level and not bands else "")
+                if s.parts:
+                    tip += f"\nAverage of {len(s.parts)} number scores:" + "".join(f"\n  {name}: {val}" for name, val in s.parts)
+                cell.setToolTip(tip)
                 if level:
                     cell.setBackground(QBrush(QColor(LEVEL_COLORS[level][dark])))
                     cell.setForeground(QBrush(QColor("#f4f4f5" if dark else "#18181b")))
@@ -382,6 +387,11 @@ class PerformancePage(QWidget):
         num.setToolTip(value)
         if sub:
             lab.setText(sub)
+
+
+def _point_label(s) -> str:
+    """A graph point's tooltip text; an averaged mark lists the scores it came from."""
+    return s.label + "".join(f"<br>&nbsp;&nbsp;{html.escape(name)}: {html.escape(val)}" for name, val in s.parts)
 
 
 def _short(s: str, n: int = 22) -> str:
